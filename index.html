@@ -1280,6 +1280,9 @@
     function show(id) { document.getElementById(id).classList.remove('hidden'); }
     function hide(id) { document.getElementById(id).classList.add('hidden'); }
     function toggle(id, cond) { cond ? show(id) : hide(id); }
+    function esc(v) {
+      return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
 
     function toast(msg, type = 'default') {
       const t = document.getElementById('toast');
@@ -1312,7 +1315,8 @@
 
       db.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_IN' && session) {
-          await loadUserAndRoute(session.user);
+          if (currentProfile && currentUser && currentUser.id === session.user.id) return;
+          setTimeout(() => loadUserAndRoute(session.user), 0);
         } else if (event === 'SIGNED_OUT') {
           currentUser = null; currentProfile = null;
           hide('app'); show('page-login');
@@ -1356,39 +1360,21 @@
     async function loadUserAndRoute(user) {
       currentUser = user;
 
-      // maybeSingle() no lanza error si no hay fila (devuelve null)
-      const { data: profile, error } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
+      const { data: profile, error } = await db.from('perfiles')
+        .select('id, nombre, rol').eq('id', user.id).maybeSingle();
 
-      if (error) {
-        showLoader(false);
-        console.error('Error al leer perfil:', error);
-        toast('Error al leer perfil: ' + error.message, 'err');
+      if (error || !profile) {
+        if (error) console.error('Error al leer perfil:', error);
+        const msg = error
+          ? 'Error al leer perfil: ' + error.message
+          : 'Tu usuario no tiene un perfil asignado. Contacta al administrador.';
         await db.auth.signOut();
+        currentUser = null; currentProfile = null;
+        hide('app'); show('page-login'); showLoader(false);
+        toast(msg, 'err');
         return;
       }
 
-      // Si no existe el perfil, intentarlo crear con los metadatos del usuario
-      if (!profile) {
-        const meta = user.user_metadata || {};
-        const rolPorEmail = getRolPorEmail(user.email);
-        const newProfile = {
-          id: user.id,
-          nombre: meta.nombre || user.email,
-          rol: meta.rol || rolPorEmail,
-          materia_id: meta.materia_id ? parseInt(meta.materia_id) : getMateriaPorEmail(user.email)
-        };
-        const { error: insertError } = await db.from('profiles').insert(newProfile);
-        if (insertError) {
-          showLoader(false);
-          console.error('No se pudo crear perfil:', insertError);
-          toast('No se pudo crear el perfil: ' + insertError.message, 'err');
-          await db.auth.signOut();
-          return;
-        }
-        currentProfile = newProfile;
-      } else {
-        currentProfile = profile;
-      }
       currentProfile = profile;
 
       hide('page-login');
@@ -1411,58 +1397,55 @@
 
     function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
 
-    // Detecta el rol según el email (fallback si no hay metadata)
-    function getRolPorEmail(email) {
-      if (!email) return 'estudiante';
-      if (email.includes('admin')) return 'administrador';
-      if (email.includes('academico')) return 'academico';
-      const docenteEmails = ['juan.macas', 'diego.villavicencio', 'miguel.gonzales'];
-      if (docenteEmails.some(e => email.includes(e))) return 'docente';
-      return 'estudiante';
-    }
-
-    // Detecta materia_id para docentes según email
-    function getMateriaPorEmail(email) {
-      if (!email) return null;
-      if (email.includes('juan.macas')) return 1;
-      if (email.includes('diego.villavicencio')) return 2;
-      if (email.includes('miguel.gonzales')) return 3;
-      return null;
-    }
-
     // ── MATERIAS ──────────────────────────────────────────────────────
+    // Cada materia trae el nombre de su docente en profesor_nombre
     async function getMaterias() {
-      const { data } = await db.from('materias').select('*').order('id');
-      return data || [];
+      const [mat, doc] = await Promise.all([
+        db.from('materias').select('id, nombre, docente_id').order('id'),
+        db.from('perfiles').select('id, nombre').eq('rol', 'docente')
+      ]);
+      const nombres = {};
+      (doc.data || []).forEach(d => { nombres[d.id] = d.nombre; });
+      return (mat.data || []).map(m => ({
+        ...m,
+        profesor_nombre: nombres[m.docente_id] || 'Sin docente asignado'
+      }));
     }
 
     // ── PREGUNTAS ─────────────────────────────────────────────────────
     async function getPreguntas(tipo) {
-      const tabla = { hetero: 'preguntas_heteroevaluacion', auto: 'preguntas_autoevaluacion', coe: 'preguntas_coevaluacion' }[tipo];
-      const { data } = await db.from(tabla).select('*').order('orden');
+      const { data } = await db.from('preguntas').select('id, texto, orden')
+        .eq('tipo', tipo).eq('activa', true).order('orden');
       return data || [];
     }
 
-    // ── VERIFICAR SI YA RESPONDIÓ ─────────────────────────────────────
-    async function yaRespondio(tipo, materiaId) {
-      const tabla = { hetero: 'respuestas_heteroevaluacion', auto: 'respuestas_autoevaluacion', coe: 'respuestas_coevaluacion' }[tipo];
-      const { data } = await db.from(tabla).select('id').eq('user_id', currentUser.id).eq('materia_id', materiaId).limit(1);
-      return data && data.length > 0;
+    // ── MATERIAS QUE EL USUARIO YA EVALUÓ ─────────────────────────────
+    async function getMisEvaluadas(tipo) {
+      const { data } = await db.from('evaluaciones').select('materia_id')
+        .eq('tipo', tipo).eq('evaluador_id', currentUser.id);
+      return new Set((data || []).map(e => e.materia_id));
     }
 
     // ── RENDER MATERIAS (TARJETAS) ─────────────────────────────────────
-    async function renderSubjects(containerId, tipo, onSelect) {
-      const materias = await getMaterias();
+    // filtro (opcional): función que decide qué materias se muestran
+    async function renderSubjects(containerId, tipo, onSelect, filtro) {
+      const [todas, evaluadas] = await Promise.all([getMaterias(), getMisEvaluadas(tipo)]);
+      const materias = filtro ? todas.filter(filtro) : todas;
       const container = document.getElementById(containerId);
       container.innerHTML = '';
 
+      if (!materias.length) {
+        container.innerHTML = '<p style="color:var(--gray2);">No tienes materias asignadas para evaluar.</p>';
+        return;
+      }
+
       for (const m of materias) {
-        const done = await yaRespondio(tipo, m.id);
+        const done = evaluadas.has(m.id);
         const card = document.createElement('div');
         card.className = 'subject-card' + (done ? ' done' : '');
         card.innerHTML = `
-      <div class="subject-name">${m.nombre}</div>
-      <div class="subject-prof">${m.profesor_nombre}</div>
+      <div class="subject-name">${esc(m.nombre)}</div>
+      <div class="subject-prof">${esc(m.profesor_nombre)}</div>
     `;
         if (!done) card.addEventListener('click', () => onSelect(m));
         container.appendChild(card);
@@ -1474,6 +1457,8 @@
       surveyType = tipo;
       allQuestions = questions;
       answers = {};
+      const saveBtn = document.getElementById({ hetero: 'btn-save-hetero', auto: 'btn-save-auto', coe: 'btn-save-coe' }[tipo]);
+      if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Guardar respuestas'; }
       const container = document.getElementById(containerId);
       container.innerHTML = '';
 
@@ -1540,34 +1525,17 @@
     // ── DOCENTE ───────────────────────────────────────────────────────
     async function initDocente() {
       show('view-docente'); show('doc-select'); hide('doc-survey');
-      // Docentes solo ven su propia materia
-      const materias = await getMaterias();
-      const container = document.getElementById('doc-subjects');
-      container.innerHTML = '';
-
-      // Filtra la materia asignada al docente (si tiene materia_id en perfil)
-      // Si no, muestra todas
-      const misMaterias = currentProfile.materia_id
-        ? materias.filter(m => m.id === currentProfile.materia_id)
-        : materias;
-
-      for (const m of misMaterias) {
-        const done = await yaRespondio('auto', m.id);
-        const card = document.createElement('div');
-        card.className = 'subject-card' + (done ? ' done' : '');
-        card.innerHTML = `<div class="subject-name">${m.nombre}</div><div class="subject-prof">${m.profesor_nombre}</div>`;
-        if (!done) card.addEventListener('click', async () => {
-          currentMateria = m;
-          answers = {};
-          const qs = await getPreguntas('auto');
-          document.getElementById('doc-survey-title').textContent = 'Autoevaluación — ' + m.nombre;
-          document.getElementById('doc-survey-sub').textContent = m.profesor_nombre;
-          renderSurvey('doc-questions', qs, 'doc-progress', 'auto');
-          document.getElementById('btn-pdf-auto').disabled = true;
-          hide('doc-select'); show('doc-survey');
-        });
-        container.appendChild(card);
-      }
+      // El docente solo ve las materias que tiene a su cargo
+      await renderSubjects('doc-subjects', 'auto', async (m) => {
+        currentMateria = m;
+        answers = {};
+        const qs = await getPreguntas('auto');
+        document.getElementById('doc-survey-title').textContent = 'Autoevaluación — ' + m.nombre;
+        document.getElementById('doc-survey-sub').textContent = m.profesor_nombre;
+        renderSurvey('doc-questions', qs, 'doc-progress', 'auto');
+        document.getElementById('btn-pdf-auto').disabled = true;
+        hide('doc-select'); show('doc-survey');
+      }, m => m.docente_id === currentUser.id);
     }
 
     // ── ACADÉMICO ─────────────────────────────────────────────────────
@@ -1590,27 +1558,24 @@
       if (Object.keys(answers).length < allQuestions.length) {
         toast('Por favor responde todas las preguntas', 'err'); return;
       }
-      const tabla = { hetero: 'respuestas_heteroevaluacion', auto: 'respuestas_autoevaluacion', coe: 'respuestas_coevaluacion' }[tipo];
       const btnId = { hetero: 'btn-save-hetero', auto: 'btn-save-auto', coe: 'btn-save-coe' }[tipo];
       const pdfId = { hetero: 'btn-pdf-hetero', auto: 'btn-pdf-auto', coe: 'btn-pdf-coe' }[tipo];
 
       const btn = document.getElementById(btnId);
       btn.disabled = true; btn.textContent = 'Guardando...';
 
-      const rows = Object.entries(answers).map(([pregunta_id, respuesta]) => ({
-        user_id: currentUser.id,
-        materia_id: currentMateria.id,
-        pregunta_id: parseInt(pregunta_id),
-        respuesta: parseInt(respuesta)
-      }));
-
-      const { error } = await db.from(tabla).upsert(rows, { onConflict: 'user_id,materia_id,pregunta_id' });
-      btn.disabled = false;
-      btn.textContent = '💾 Guardar respuestas';
+      // La base guarda la evaluación completa en un solo paso
+      const { error } = await db.rpc('guardar_evaluacion', {
+        p_materia_id: currentMateria.id,
+        p_respuestas: answers
+      });
 
       if (error) {
+        btn.disabled = false;
+        btn.textContent = '💾 Guardar respuestas';
         toast('Error al guardar: ' + error.message, 'err');
       } else {
+        btn.textContent = '✓ Respuestas guardadas';
         toast('Respuestas guardadas correctamente ✓', 'ok');
         document.getElementById(pdfId).disabled = false;
         savedSurveyIds[tipo] = true;
@@ -1746,57 +1711,84 @@
     }
 
     // ── ADMIN ─────────────────────────────────────────────────────────
+    const TIPOS = ['hetero', 'auto', 'coe'];
+    const NOMBRES_COMP = { hetero: 'Heteroevaluación', auto: 'Autoevaluación', coe: 'Coevaluación' };
+    const PESO_COMP = { hetero: 30, auto: 10, coe: 60 };
+    // Relación rol ↔ evaluación que le corresponde
+    const TIPO_POR_ROL = { estudiante: 'hetero', docente: 'auto', academico: 'coe' };
+    const ROL_POR_TIPO = { hetero: 'estudiante', auto: 'docente', coe: 'academico' };
+    const ROL_LABEL = { estudiante: 'Estudiante', docente: 'Docente', academico: 'Personal académico' };
+    const TODOS_LABEL = { hetero: 'Todos los estudiantes', auto: 'Todos los docentes', coe: 'Todo el personal académico', todos: 'Todos los usuarios' };
+    const ORDEN_ROL = { estudiante: 0, docente: 1, academico: 2 };
+
+    let adminStore = { materias: [], perfiles: [], evaluaciones: [] };
+    let seguimientoData = [];
+
+    // Trae todas las filas de una tabla (Supabase devuelve máximo 1000 por consulta)
+    async function fetchAll(tabla, columnas) {
+      const filas = [];
+      const paso = 1000;
+      for (let desde = 0; ; desde += paso) {
+        const { data, error } = await db.from(tabla).select(columnas).order('id').range(desde, desde + paso - 1);
+        if (error) throw error;
+        filas.push(...(data || []));
+        if (!data || data.length < paso) break;
+      }
+      return filas;
+    }
+
     async function initAdmin() {
       show('view-admin');
       await loadAdminResults();
     }
 
+    // Carga todo lo que usa el panel: resultados, usuarios y borrado
     async function loadAdminResults() {
-      const materias = await getMaterias();
-      loadDeleteUsuarios();
+      try {
+        const [materias, perfiles, evaluaciones, respuestas] = await Promise.all([
+          getMaterias(),
+          fetchAll('perfiles', 'id, nombre, rol'),
+          fetchAll('evaluaciones', 'id, tipo, evaluador_id, materia_id'),
+          fetchAll('respuestas', 'id, evaluacion_id, valor')
+        ]);
+        perfiles.sort((x, y) => ((ORDEN_ROL[x.rol] ?? 9) - (ORDEN_ROL[y.rol] ?? 9)) ||
+          String(x.nombre || '').localeCompare(String(y.nombre || ''), 'es', { numeric: true }));
+        adminStore = { materias, perfiles, evaluaciones };
 
-      // Calcular scores por materia
-      adminData = await Promise.all(materias.map(async (m) => {
-        const hetero = await calcHetero(m.id);
-        const auto = await calcAuto(m.id);
-        const coe = await calcCoe(m.id);
-        const total = Math.round((hetero + auto + coe) * 100) / 100;
-        return { materia: m, hetero, auto, coe, total, cal: calLabel(total) };
-      }));
+        // evaluacion_id → suma de valores y número de respuestas
+        const porEval = {};
+        respuestas.forEach(r => {
+          const g = (porEval[r.evaluacion_id] = porEval[r.evaluacion_id] || { suma: 0, n: 0 });
+          g.suma += r.valor; g.n += 1;
+        });
+
+        // Puntaje por materia: (suma / máximo posible) × peso del componente
+        adminData = materias.map(m => {
+          const puntos = {};
+          TIPOS.forEach(t => {
+            let suma = 0, n = 0;
+            evaluaciones.forEach(e => {
+              if (e.materia_id !== m.id || e.tipo !== t) return;
+              const g = porEval[e.id];
+              if (g) { suma += g.suma; n += g.n; }
+            });
+            puntos[t] = n ? Math.round((suma / (n * 4)) * PESO_COMP[t] * 100) / 100 : 0;
+          });
+          const total = Math.round((puntos.hetero + puntos.auto + puntos.coe) * 100) / 100;
+          return { materia: m, hetero: puntos.hetero, auto: puntos.auto, coe: puntos.coe, total, cal: calLabel(total) };
+        });
+      } catch (err) {
+        console.error('Error al cargar el panel:', err);
+        toast('Error al cargar los datos: ' + err.message, 'err');
+        adminStore = { materias: [], perfiles: [], evaluaciones: [] };
+        adminData = [];
+      }
 
       renderResultsTable();
       renderChart();
-    }
-
-    async function calcHetero(materiaId) {
-      const { data } = await db.from('respuestas_heteroevaluacion')
-        .select('respuesta, user_id').eq('materia_id', materiaId);
-      if (!data || data.length === 0) return 0;
-      const sumTotal = data.reduce((acc, r) => acc + r.respuesta, 0);
-      const usuarios = new Set(data.map(r => r.user_id)).size;
-      const maxPosible = usuarios * 5 * 4; // usuarios × preguntas × máx
-      if (maxPosible === 0) return 0;
-      return Math.round((sumTotal / maxPosible) * 30 * 100) / 100;
-    }
-
-    async function calcAuto(materiaId) {
-      const { data } = await db.from('respuestas_autoevaluacion')
-        .select('respuesta').eq('materia_id', materiaId);
-      if (!data || data.length === 0) return 0;
-      const sumTotal = data.reduce((acc, r) => acc + r.respuesta, 0);
-      const maxPosible = 5 * 4;
-      return Math.round((sumTotal / maxPosible) * 10 * 100) / 100;
-    }
-
-    async function calcCoe(materiaId) {
-      const { data } = await db.from('respuestas_coevaluacion')
-        .select('respuesta, user_id').eq('materia_id', materiaId);
-      if (!data || data.length === 0) return 0;
-      const sumTotal = data.reduce((acc, r) => acc + r.respuesta, 0);
-      const usuarios = new Set(data.map(r => r.user_id)).size;
-      const maxPosible = usuarios * 5 * 4;
-      if (maxPosible === 0) return 0;
-      return Math.round((sumTotal / maxPosible) * 60 * 100) / 100;
+      fillDeleteUsuarios();
+      buildSeguimiento();
+      renderSeguimiento();
     }
 
     function renderResultsTable() {
@@ -1807,7 +1799,7 @@
       }
       tbody.innerHTML = adminData.map(d => `
     <tr>
-      <td>${d.materia.profesor_nombre}</td>
+      <td>${esc(d.materia.profesor_nombre)}<div style="font-weight:400;font-size:.8rem;color:var(--gray2);">${esc(d.materia.nombre)}</div></td>
       <td>${d.hetero.toFixed(2)}</td>
       <td>${d.auto.toFixed(2)}</td>
       <td>${d.coe.toFixed(2)}</td>
@@ -1818,30 +1810,6 @@
     }
 
     // ── ADMIN: BORRAR RESPUESTAS ───────────────────────────────────────
-    const TABLAS_RESP = {
-      hetero: 'respuestas_heteroevaluacion',
-      auto: 'respuestas_autoevaluacion',
-      coe: 'respuestas_coevaluacion'
-    };
-    const NOMBRES_COMP = { hetero: 'Heteroevaluación', auto: 'Autoevaluación', coe: 'Coevaluación' };
-
-    // Rol que responde cada componente
-    const ROL_POR_TIPO = { hetero: 'estudiante', auto: 'docente', coe: 'academico' };
-    const TODOS_LABEL = { hetero: 'Todos los estudiantes', auto: 'Todos los docentes', coe: 'Todo el personal académico', todos: 'Todos los usuarios' };
-    let perfilesBorrado = [];
-
-    // Carga los usuarios (estudiantes, docentes y personal académico) para el selector
-    async function loadDeleteUsuarios() {
-      const { data, error } = await db.from('profiles').select('id, nombre, rol');
-      if (error) { console.error('Error al leer usuarios:', error); return; }
-      const orden = { estudiante: 0, docente: 1, academico: 2 };
-      perfilesBorrado = (data || [])
-        .filter(p => p.rol in orden)
-        .sort((x, y) => (orden[x.rol] - orden[y.rol]) ||
-          String(x.nombre || '').localeCompare(String(y.nombre || ''), 'es', { numeric: true }));
-      fillDeleteUsuarios();
-    }
-
     // Llena el selector de usuarios según el componente elegido
     function fillDeleteUsuarios() {
       const tipo = document.getElementById('del-tipo').value;
@@ -1852,8 +1820,8 @@
       todos.value = 'todos';
       todos.textContent = TODOS_LABEL[tipo];
       sel.appendChild(todos);
-      perfilesBorrado
-        .filter(p => tipo === 'todos' || p.rol === ROL_POR_TIPO[tipo])
+      adminStore.perfiles
+        .filter(p => tipo === 'todos' ? (p.rol in TIPO_POR_ROL) : p.rol === ROL_POR_TIPO[tipo])
         .forEach(p => {
           const opt = document.createElement('option');
           opt.value = p.id;
@@ -1870,7 +1838,7 @@
       const tipo = document.getElementById('del-tipo').value;
       const sel = document.getElementById('del-usuario');
       const usuarioVal = sel.value;
-      const tipos = tipo === 'todos' ? ['hetero', 'auto', 'coe'] : [tipo];
+      const tipos = tipo === 'todos' ? TIPOS : [tipo];
       const componentes = tipos.map(t => NOMBRES_COMP[t]).join(', ');
       const alcance = sel.options[sel.selectedIndex].text;
 
@@ -1885,92 +1853,49 @@
       const btn = document.getElementById('btn-del');
       btn.disabled = true; btn.textContent = 'Borrando...';
 
-      let borradas = 0;
-      const errores = [];
-      for (const t of tipos) {
-        let q = db.from(TABLAS_RESP[t]).delete({ count: 'exact' });
-        q = usuarioVal === 'todos' ? q.not('id', 'is', null) : q.eq('user_id', usuarioVal);
-        const { error, count } = await q;
-        if (error) errores.push(NOMBRES_COMP[t] + ': ' + error.message);
-        else borradas += count || 0;
-      }
+      // Al borrar la evaluación, la base borra también sus respuestas
+      let q = db.from('evaluaciones').delete({ count: 'exact' }).in('tipo', tipos);
+      if (usuarioVal !== 'todos') q = q.eq('evaluador_id', usuarioVal);
+      const { error, count } = await q;
 
       btn.disabled = false; btn.textContent = '🗑 Borrar respuestas';
 
-      if (errores.length) {
-        toast('Error al borrar — ' + errores.join(' | '), 'err');
-      } else if (borradas === 0) {
-        toast('No se borró ninguna respuesta (no había datos o falta el permiso de borrado en Supabase)');
+      if (error) {
+        toast('Error al borrar: ' + error.message, 'err');
+      } else if (!count) {
+        toast('No había respuestas que borrar');
       } else {
-        toast('Se borraron ' + borradas + ' respuestas ✓', 'ok');
+        toast('Se borraron ' + count + (count === 1 ? ' evaluación ✓' : ' evaluaciones ✓'), 'ok');
       }
       await loadAdminResults();
     }
 
     // ── ADMIN: USUARIOS Y EVALUACIONES ASIGNADAS ───────────────────────
-    // Relación rol → evaluación que debe resolver
-    const TIPO_POR_ROL = { estudiante: 'hetero', docente: 'auto', academico: 'coe' };
-    const ROL_LABEL = { estudiante: 'Estudiante', docente: 'Docente', academico: 'Personal académico' };
-    let seguimientoData = [];
-
-    function esc(v) {
-      return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
-    }
-
-    // Trae todas las filas de una tabla (Supabase devuelve máximo 1000 por consulta)
-    async function fetchAll(tabla, columnas) {
-      const filas = [];
-      const paso = 1000;
-      for (let desde = 0; ; desde += paso) {
-        const { data, error } = await db.from(tabla).select(columnas).order('id').range(desde, desde + paso - 1);
-        if (error) throw error;
-        filas.push(...(data || []));
-        if (!data || data.length < paso) break;
-      }
-      return filas;
-    }
-
     async function loadSeguimiento() {
       const tbody = document.getElementById('seg-body');
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:28px;">Cargando usuarios...</td></tr>';
-      try {
-        const [materias, perfiles, rHetero, rAuto, rCoe] = await Promise.all([
-          getMaterias(),
-          fetchAll('profiles', 'id, nombre, rol, materia_id'),
-          fetchAll(TABLAS_RESP.hetero, 'id, user_id, materia_id'),
-          fetchAll(TABLAS_RESP.auto, 'id, user_id, materia_id'),
-          fetchAll(TABLAS_RESP.coe, 'id, user_id, materia_id')
-        ]);
+      await loadAdminResults();
+    }
 
-        // tipo → user_id → Set de materias ya respondidas
-        const hechas = { hetero: {}, auto: {}, coe: {} };
-        const registrar = (tipo, filas) => filas.forEach(r => {
-          (hechas[tipo][r.user_id] = hechas[tipo][r.user_id] || new Set()).add(r.materia_id);
+    function buildSeguimiento() {
+      const { materias, perfiles, evaluaciones } = adminStore;
+      // "tipo|usuario" → Set de materias ya evaluadas
+      const hechas = {};
+      evaluaciones.forEach(e => {
+        const k = e.tipo + '|' + e.evaluador_id;
+        (hechas[k] = hechas[k] || new Set()).add(e.materia_id);
+      });
+
+      seguimientoData = perfiles
+        .filter(p => TIPO_POR_ROL[p.rol])
+        .map(p => {
+          const tipo = TIPO_POR_ROL[p.rol];
+          // El docente solo evalúa sus materias; estudiantes y académicos, todas
+          const asignadas = p.rol === 'docente' ? materias.filter(m => m.docente_id === p.id) : materias;
+          const set = hechas[tipo + '|' + p.id] || new Set();
+          const pendientes = asignadas.filter(m => !set.has(m.id));
+          return { perfil: p, tipo, asignadas, pendientes, resueltas: asignadas.length - pendientes.length };
         });
-        registrar('hetero', rHetero); registrar('auto', rAuto); registrar('coe', rCoe);
-
-        const ordenRol = { estudiante: 0, docente: 1, academico: 2 };
-        seguimientoData = perfiles
-          .filter(p => TIPO_POR_ROL[p.rol])
-          .map(p => {
-            const tipo = TIPO_POR_ROL[p.rol];
-            // El docente solo evalúa su materia; estudiantes y académicos, todas
-            const asignadas = (p.rol === 'docente' && p.materia_id)
-              ? materias.filter(m => m.id === p.materia_id)
-              : materias;
-            const set = hechas[tipo][p.id] || new Set();
-            const pendientes = asignadas.filter(m => !set.has(m.id));
-            return { perfil: p, tipo, asignadas, pendientes, resueltas: asignadas.length - pendientes.length };
-          })
-          .sort((a, b) => (ordenRol[a.perfil.rol] - ordenRol[b.perfil.rol]) ||
-            String(a.perfil.nombre || '').localeCompare(String(b.perfil.nombre || ''), 'es', { numeric: true }));
-
-        renderSeguimiento();
-      } catch (err) {
-        console.error('Error al cargar usuarios:', err);
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:28px;">No se pudo cargar la lista de usuarios</td></tr>';
-        toast('Error al cargar usuarios: ' + err.message, 'err');
-      }
     }
 
     function renderSeguimiento() {
@@ -1998,7 +1923,8 @@
 
       tbody.innerHTML = filas.map(d => {
         let badge;
-        if (d.pendientes.length === 0) badge = '<span class="badge-cal cal-excelente">Completado</span>';
+        if (!d.asignadas.length) badge = '<span class="badge-cal" style="background:#e2e8f0;color:#475569;">Sin materias</span>';
+        else if (d.pendientes.length === 0) badge = '<span class="badge-cal cal-excelente">Completado</span>';
         else if (d.resueltas > 0) badge = '<span class="badge-cal cal-bueno">En progreso</span>';
         else badge = '<span class="badge-cal cal-deficiente">Pendiente</span>';
         const porResolver = d.pendientes.length
@@ -2023,7 +1949,7 @@
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (tab === 'estadisticas') renderChart();
-      if (tab === 'usuarios') loadSeguimiento();
+      if (tab === 'usuarios' || tab === 'borrar') loadAdminResults();
     }
 
     // ── CHART ─────────────────────────────────────────────────────────
