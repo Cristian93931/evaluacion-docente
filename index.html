@@ -1125,8 +1125,6 @@
             </div>
           </div>
 
-          <!-- Resultados por componente y usuario -->
-          <div id="detalle-componentes"></div>
         </div>
 
         <!-- Estadísticas Tab -->
@@ -1768,7 +1766,6 @@
 
       renderResultsTable();
       renderChart();
-      await loadDetalleComponentes(materias);
     }
 
     async function calcHetero(materiaId) {
@@ -2017,88 +2014,6 @@
       <td>${badge}</td>
     </tr>`;
       }).join('');
-    }
-
-    // ── ADMIN: RESULTADOS POR COMPONENTE Y USUARIO ─────────────────────
-    const PESO_COMP = { hetero: 30, auto: 10, coe: 60 };
-    const GRUPO_COMP = { hetero: 'Estudiantes', auto: 'Docentes', coe: 'Personal académico' };
-
-    async function loadDetalleComponentes(materias) {
-      const cont = document.getElementById('detalle-componentes');
-      try {
-        const [perfiles, rHetero, rAuto, rCoe] = await Promise.all([
-          fetchAll('profiles', 'id, nombre, rol'),
-          fetchAll(TABLAS_RESP.hetero, 'id, user_id, materia_id, respuesta'),
-          fetchAll(TABLAS_RESP.auto, 'id, user_id, materia_id, respuesta'),
-          fetchAll(TABLAS_RESP.coe, 'id, user_id, materia_id, respuesta')
-        ]);
-        const respuestas = { hetero: rHetero, auto: rAuto, coe: rCoe };
-        cont.innerHTML = ['hetero', 'auto', 'coe']
-          .map(tipo => detalleComponenteHTML(tipo, perfiles, respuestas[tipo], materias))
-          .join('');
-      } catch (err) {
-        console.error('Error al cargar resultados por componente:', err);
-        cont.innerHTML = '<div class="card mt-3" style="color:var(--danger);">No se pudieron cargar los resultados por componente.</div>';
-      }
-    }
-
-    function detalleComponenteHTML(tipo, perfiles, respuestas, materias) {
-      const peso = PESO_COMP[tipo];
-      const conDocente = tipo !== 'auto'; // en la autoevaluación el docente se evalúa a sí mismo
-      const columnas = conDocente ? 4 : 3;
-      const usuarios = perfiles
-        .filter(p => p.rol === ROL_POR_TIPO[tipo])
-        .sort((x, y) => String(x.nombre || '').localeCompare(String(y.nombre || ''), 'es', { numeric: true }));
-
-      // user_id → materia_id → { suma, n }
-      const porUsuario = {};
-      respuestas.forEach(r => {
-        const u = (porUsuario[r.user_id] = porUsuario[r.user_id] || {});
-        const g = (u[r.materia_id] = u[r.materia_id] || { suma: 0, n: 0 });
-        g.suma += r.respuesta; g.n += 1;
-      });
-
-      const filas = [];
-      usuarios.forEach(p => {
-        const nombre = esc(p.nombre || 'Sin nombre');
-        const mias = porUsuario[p.id] || {};
-        const evaluadas = materias.filter(m => mias[m.id]);
-        if (!evaluadas.length) {
-          filas.push(`<tr><td>${nombre}</td><td colspan="${columnas - 1}" style="color:var(--gray2);font-weight:400;">Sin respuestas</td></tr>`);
-          return;
-        }
-        evaluadas.forEach(m => {
-          const g = mias[m.id];
-          const max = g.n * 4;
-          const equivalente = max ? (g.suma / max) * peso : 0;
-          filas.push(`<tr>
-        <td>${nombre}</td>
-        ${conDocente ? `<td>${esc(m.profesor_nombre)}</td>` : ''}
-        <td>${g.suma} de ${max}</td>
-        <td><strong>${equivalente.toFixed(2)}</strong> / ${peso}</td>
-      </tr>`);
-        });
-      });
-
-      if (!filas.length) {
-        filas.push(`<tr><td colspan="${columnas}" style="text-align:center;color:var(--gray2);padding:28px;">No hay usuarios con este rol</td></tr>`);
-      }
-
-      return `
-    <div class="card mt-3">
-      <h3 style="font-family:var(--font-head);margin-bottom:16px;font-size:1.05rem;">${NOMBRES_COMP[tipo]} — ${GRUPO_COMP[tipo]} (${peso} pts)</h3>
-      <div class="results-table-wrap">
-        <table class="results-table">
-          <thead><tr>
-            <th>Usuario</th>
-            ${conDocente ? '<th>Docente evaluado</th>' : ''}
-            <th>Puntaje</th>
-            <th>Equivalente</th>
-          </tr></thead>
-          <tbody>${filas.join('')}</tbody>
-        </table>
-      </div>
-    </div>`;
     }
 
     // ── ADMIN TABS ─────────────────────────────────────────────────────
