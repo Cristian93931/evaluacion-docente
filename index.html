@@ -1762,20 +1762,35 @@
           g.suma += r.valor; g.n += 1;
         });
 
-        // Puntaje por materia: (suma / máximo posible) × peso del componente
-        adminData = materias.map(m => {
+        // Puntaje de cada materia por componente: (suma / máximo posible) × peso.
+        // null = esa materia aún no tiene respuestas en ese componente.
+        const puntajeMateria = (m, t) => {
+          let suma = 0, n = 0;
+          evaluaciones.forEach(e => {
+            if (e.materia_id !== m.id || e.tipo !== t) return;
+            const g = porEval[e.id];
+            if (g) { suma += g.suma; n += g.n; }
+          });
+          return n ? (suma / (n * 4)) * PESO_COMP[t] : null;
+        };
+
+        // Una fila por docente: si tiene varias materias, se promedian
+        const grupos = new Map();
+        materias.forEach(m => {
+          const clave = m.docente_id || 'sin-docente';
+          if (!grupos.has(clave)) grupos.set(clave, { nombre: m.profesor_nombre, materias: [] });
+          grupos.get(clave).materias.push(m);
+        });
+
+        adminData = [...grupos.values()].map(g => {
           const puntos = {};
           TIPOS.forEach(t => {
-            let suma = 0, n = 0;
-            evaluaciones.forEach(e => {
-              if (e.materia_id !== m.id || e.tipo !== t) return;
-              const g = porEval[e.id];
-              if (g) { suma += g.suma; n += g.n; }
-            });
-            puntos[t] = n ? Math.round((suma / (n * 4)) * PESO_COMP[t] * 100) / 100 : 0;
+            const valores = g.materias.map(m => puntajeMateria(m, t)).filter(v => v !== null);
+            const promedio = valores.length ? valores.reduce((a, b) => a + b, 0) / valores.length : 0;
+            puntos[t] = Math.round(promedio * 100) / 100;
           });
           const total = Math.round((puntos.hetero + puntos.auto + puntos.coe) * 100) / 100;
-          return { materia: m, hetero: puntos.hetero, auto: puntos.auto, coe: puntos.coe, total, cal: calLabel(total) };
+          return { materia: { profesor_nombre: g.nombre }, hetero: puntos.hetero, auto: puntos.auto, coe: puntos.coe, total, cal: calLabel(total) };
         });
       } catch (err) {
         console.error('Error al cargar el panel:', err);
@@ -1799,7 +1814,7 @@
       }
       tbody.innerHTML = adminData.map(d => `
     <tr>
-      <td>${esc(d.materia.profesor_nombre)}<div style="font-weight:400;font-size:.8rem;color:var(--gray2);">${esc(d.materia.nombre)}</div></td>
+      <td>${esc(d.materia.profesor_nombre)}</td>
       <td>${d.hetero.toFixed(2)}</td>
       <td>${d.auto.toFixed(2)}</td>
       <td>${d.coe.toFixed(2)}</td>
