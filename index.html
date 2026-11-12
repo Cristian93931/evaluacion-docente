@@ -1265,19 +1265,19 @@
 
     // ── LOGOUT ────────────────────────────────────────────────────────
     async function logout() {
-  showLoader(true);
-  try {
-    await db.auth.signOut();
-  } catch (e) {
-    console.error('Error al cerrar sesión:', e);
-  }
-  currentUser = null;
-  currentProfile = null;
-  hide('app');
-  show('page-login');
-  document.getElementById('login-pass').value = '';
-  showLoader(false);
-}
+      showLoader(true);
+      try {
+        await db.auth.signOut();
+      } catch (e) {
+        console.error('Error al cerrar sesión:', e);
+      }
+      currentUser = null;
+      currentProfile = null;
+      hide('app');
+      show('page-login');
+      document.getElementById('login-pass').value = '';
+      showLoader(false);
+    }
 
     // ── CARGA DE USUARIO ──────────────────────────────────────────────
     async function loadUserAndRoute(user) {
