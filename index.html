@@ -1077,6 +1077,7 @@
         <div class="tab-bar">
           <button class="tab-btn active" onclick="adminTab('resultados',this)">📊 Resultados</button>
           <button class="tab-btn" onclick="adminTab('estadisticas',this)">📈 Estadísticas</button>
+          <button class="tab-btn" onclick="adminTab('usuarios',this)">👥 Usuarios</button>
           <button class="tab-btn" onclick="adminTab('borrar',this)">🗑 Borrar respuestas</button>
         </div>
 
@@ -1148,6 +1149,52 @@
             </div>
             <div class="chart-wrap">
               <canvas id="main-chart"></canvas>
+            </div>
+          </div>
+        </div>
+        <!-- Usuarios Tab -->
+        <div id="tab-usuarios" class="hidden">
+          <div class="card">
+            <h3 style="font-family:var(--font-head);margin-bottom:8px;font-size:1.05rem;">Usuarios y evaluaciones
+              asignadas</h3>
+            <p style="font-size:.83rem;color:var(--gray2);margin-bottom:16px;">Estudiantes resuelven la
+              heteroevaluación, docentes la autoevaluación y el personal académico la coevaluación.</p>
+            <div class="stats-controls">
+              <label for="seg-rol">Rol:</label>
+              <select id="seg-rol" onchange="renderSeguimiento()">
+                <option value="todos">Todos</option>
+                <option value="estudiante">Estudiantes — Heteroevaluación</option>
+                <option value="docente">Docentes — Autoevaluación</option>
+                <option value="academico">Personal académico — Coevaluación</option>
+              </select>
+              <label for="seg-estado">Estado:</label>
+              <select id="seg-estado" onchange="renderSeguimiento()">
+                <option value="todos">Todos</option>
+                <option value="pendientes">Con evaluaciones por resolver</option>
+                <option value="completados">Completados</option>
+              </select>
+              <button class="btn btn-outline btn-sm" onclick="loadSeguimiento()">↻ Actualizar</button>
+            </div>
+            <p id="seg-resumen" style="font-size:.88rem;font-weight:600;margin-bottom:14px;"></p>
+            <div class="results-table-wrap">
+              <table class="results-table">
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Rol</th>
+                    <th>Evaluación</th>
+                    <th>Avance</th>
+                    <th>Por resolver</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody id="seg-body">
+                  <tr>
+                    <td colspan="6" style="text-align:center;color:var(--gray2);padding:28px;">Cargando usuarios...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
@@ -1840,13 +1887,123 @@
       await loadAdminResults();
     }
 
+    // ── ADMIN: USUARIOS Y EVALUACIONES ASIGNADAS ───────────────────────
+    // Relación rol → evaluación que debe resolver
+    const TIPO_POR_ROL = { estudiante: 'hetero', docente: 'auto', academico: 'coe' };
+    const ROL_LABEL = { estudiante: 'Estudiante', docente: 'Docente', academico: 'Personal académico' };
+    let seguimientoData = [];
+
+    function esc(v) {
+      return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+    }
+
+    // Trae todas las filas de una tabla (Supabase devuelve máximo 1000 por consulta)
+    async function fetchAll(tabla, columnas) {
+      const filas = [];
+      const paso = 1000;
+      for (let desde = 0; ; desde += paso) {
+        const { data, error } = await db.from(tabla).select(columnas).order('id').range(desde, desde + paso - 1);
+        if (error) throw error;
+        filas.push(...(data || []));
+        if (!data || data.length < paso) break;
+      }
+      return filas;
+    }
+
+    async function loadSeguimiento() {
+      const tbody = document.getElementById('seg-body');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:28px;">Cargando usuarios...</td></tr>';
+      try {
+        const [materias, perfiles, rHetero, rAuto, rCoe] = await Promise.all([
+          getMaterias(),
+          fetchAll('profiles', 'id, nombre, rol, materia_id'),
+          fetchAll(TABLAS_RESP.hetero, 'id, user_id, materia_id'),
+          fetchAll(TABLAS_RESP.auto, 'id, user_id, materia_id'),
+          fetchAll(TABLAS_RESP.coe, 'id, user_id, materia_id')
+        ]);
+
+        // tipo → user_id → Set de materias ya respondidas
+        const hechas = { hetero: {}, auto: {}, coe: {} };
+        const registrar = (tipo, filas) => filas.forEach(r => {
+          (hechas[tipo][r.user_id] = hechas[tipo][r.user_id] || new Set()).add(r.materia_id);
+        });
+        registrar('hetero', rHetero); registrar('auto', rAuto); registrar('coe', rCoe);
+
+        const ordenRol = { estudiante: 0, docente: 1, academico: 2 };
+        seguimientoData = perfiles
+          .filter(p => TIPO_POR_ROL[p.rol])
+          .map(p => {
+            const tipo = TIPO_POR_ROL[p.rol];
+            // El docente solo evalúa su materia; estudiantes y académicos, todas
+            const asignadas = (p.rol === 'docente' && p.materia_id)
+              ? materias.filter(m => m.id === p.materia_id)
+              : materias;
+            const set = hechas[tipo][p.id] || new Set();
+            const pendientes = asignadas.filter(m => !set.has(m.id));
+            return { perfil: p, tipo, asignadas, pendientes, resueltas: asignadas.length - pendientes.length };
+          })
+          .sort((a, b) => (ordenRol[a.perfil.rol] - ordenRol[b.perfil.rol]) ||
+            String(a.perfil.nombre || '').localeCompare(String(b.perfil.nombre || ''), 'es', { numeric: true }));
+
+        renderSeguimiento();
+      } catch (err) {
+        console.error('Error al cargar usuarios:', err);
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger);padding:28px;">No se pudo cargar la lista de usuarios</td></tr>';
+        toast('Error al cargar usuarios: ' + err.message, 'err');
+      }
+    }
+
+    function renderSeguimiento() {
+      const rol = document.getElementById('seg-rol').value;
+      const estado = document.getElementById('seg-estado').value;
+      const tbody = document.getElementById('seg-body');
+
+      const filas = seguimientoData.filter(d => {
+        if (rol !== 'todos' && d.perfil.rol !== rol) return false;
+        if (estado === 'pendientes' && d.pendientes.length === 0) return false;
+        if (estado === 'completados' && d.pendientes.length > 0) return false;
+        return true;
+      });
+
+      const conPendientes = seguimientoData.filter(d => d.pendientes.length > 0).length;
+      document.getElementById('seg-resumen').textContent =
+        seguimientoData.length + ' usuarios con evaluación asignada · ' +
+        conPendientes + ' con evaluaciones por resolver · ' +
+        (seguimientoData.length - conPendientes) + ' completados';
+
+      if (!filas.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:28px;">Sin usuarios para este filtro</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filas.map(d => {
+        let badge;
+        if (d.pendientes.length === 0) badge = '<span class="badge-cal cal-excelente">Completado</span>';
+        else if (d.resueltas > 0) badge = '<span class="badge-cal cal-bueno">En progreso</span>';
+        else badge = '<span class="badge-cal cal-deficiente">Pendiente</span>';
+        const porResolver = d.pendientes.length
+          ? d.pendientes.map(m => esc(m.nombre) + ' <span style="color:var(--gray2);">(' + esc(m.profesor_nombre) + ')</span>').join('<br>')
+          : '—';
+        return `
+    <tr>
+      <td>${esc(d.perfil.nombre || 'Sin nombre')}</td>
+      <td>${esc(ROL_LABEL[d.perfil.rol])}</td>
+      <td>${esc(NOMBRES_COMP[d.tipo])}</td>
+      <td>${d.resueltas} de ${d.asignadas.length}</td>
+      <td style="font-weight:400;font-size:.85rem;">${porResolver}</td>
+      <td>${badge}</td>
+    </tr>`;
+      }).join('');
+    }
+
     // ── ADMIN TABS ─────────────────────────────────────────────────────
     function adminTab(tab, btn) {
-      ['tab-resultados', 'tab-estadisticas', 'tab-borrar'].forEach(hide);
+      ['tab-resultados', 'tab-estadisticas', 'tab-usuarios', 'tab-borrar'].forEach(hide);
       show('tab-' + tab);
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (tab === 'estadisticas') renderChart();
+      if (tab === 'usuarios') loadSeguimiento();
     }
 
     // ── CHART ─────────────────────────────────────────────────────────
