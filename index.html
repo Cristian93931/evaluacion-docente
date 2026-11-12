@@ -1207,15 +1207,15 @@
               componente para que puedan volver a registrarse. Esta acción no se puede deshacer.</p>
             <div class="stats-controls" style="margin-bottom:0;">
               <label for="del-tipo">Componente:</label>
-              <select id="del-tipo">
+              <select id="del-tipo" onchange="fillDeleteUsuarios()">
                 <option value="hetero">Heteroevaluación</option>
                 <option value="auto">Autoevaluación</option>
                 <option value="coe">Coevaluación</option>
                 <option value="todos">Los tres componentes</option>
               </select>
-              <label for="del-materia">Docente:</label>
-              <select id="del-materia">
-                <option value="todas">Todos los docentes</option>
+              <label for="del-usuario">Usuario:</label>
+              <select id="del-usuario">
+                <option value="todos">Todos</option>
               </select>
               <button class="btn btn-danger btn-sm" id="btn-del" onclick="deleteResponses()">🗑 Borrar
                 respuestas</button>
@@ -1753,7 +1753,7 @@
 
     async function loadAdminResults() {
       const materias = await getMaterias();
-      fillDeleteMaterias(materias);
+      loadDeleteUsuarios();
 
       // Calcular scores por materia
       adminData = await Promise.all(materias.map(async (m) => {
@@ -1825,21 +1825,41 @@
     };
     const NOMBRES_COMP = { hetero: 'Heteroevaluación', auto: 'Autoevaluación', coe: 'Coevaluación' };
 
-    // Llena el selector de docentes del bloque "Borrar respuestas"
-    function fillDeleteMaterias(materias) {
-      const sel = document.getElementById('del-materia');
+    // Rol que responde cada componente
+    const ROL_POR_TIPO = { hetero: 'estudiante', auto: 'docente', coe: 'academico' };
+    const TODOS_LABEL = { hetero: 'Todos los estudiantes', auto: 'Todos los docentes', coe: 'Todo el personal académico', todos: 'Todos los usuarios' };
+    let perfilesBorrado = [];
+
+    // Carga los usuarios (estudiantes, docentes y personal académico) para el selector
+    async function loadDeleteUsuarios() {
+      const { data, error } = await db.from('profiles').select('id, nombre, rol');
+      if (error) { console.error('Error al leer usuarios:', error); return; }
+      const orden = { estudiante: 0, docente: 1, academico: 2 };
+      perfilesBorrado = (data || [])
+        .filter(p => p.rol in orden)
+        .sort((x, y) => (orden[x.rol] - orden[y.rol]) ||
+          String(x.nombre || '').localeCompare(String(y.nombre || ''), 'es', { numeric: true }));
+      fillDeleteUsuarios();
+    }
+
+    // Llena el selector de usuarios según el componente elegido
+    function fillDeleteUsuarios() {
+      const tipo = document.getElementById('del-tipo').value;
+      const sel = document.getElementById('del-usuario');
       const previo = sel.value;
       sel.innerHTML = '';
-      const todas = document.createElement('option');
-      todas.value = 'todas';
-      todas.textContent = 'Todos los docentes';
-      sel.appendChild(todas);
-      materias.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = m.profesor_nombre + ' — ' + m.nombre;
-        sel.appendChild(opt);
-      });
+      const todos = document.createElement('option');
+      todos.value = 'todos';
+      todos.textContent = TODOS_LABEL[tipo];
+      sel.appendChild(todos);
+      perfilesBorrado
+        .filter(p => tipo === 'todos' || p.rol === ROL_POR_TIPO[tipo])
+        .forEach(p => {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = p.nombre || 'Sin nombre';
+          sel.appendChild(opt);
+        });
       if ([...sel.options].some(o => o.value === previo)) sel.value = previo;
     }
 
@@ -1848,16 +1868,16 @@
         toast('Solo el administrador puede borrar respuestas', 'err'); return;
       }
       const tipo = document.getElementById('del-tipo').value;
-      const sel = document.getElementById('del-materia');
-      const materiaVal = sel.value;
+      const sel = document.getElementById('del-usuario');
+      const usuarioVal = sel.value;
       const tipos = tipo === 'todos' ? ['hetero', 'auto', 'coe'] : [tipo];
       const componentes = tipos.map(t => NOMBRES_COMP[t]).join(', ');
-      const alcance = materiaVal === 'todas' ? 'TODOS los docentes' : sel.options[sel.selectedIndex].text;
+      const alcance = sel.options[sel.selectedIndex].text;
 
       const ok = confirm(
         'Vas a borrar las respuestas de:\n\n' +
         'Componente: ' + componentes + '\n' +
-        'Docente: ' + alcance + '\n\n' +
+        'Usuario: ' + alcance + '\n\n' +
         'Esta acción no se puede deshacer. ¿Deseas continuar?'
       );
       if (!ok) return;
@@ -1869,7 +1889,7 @@
       const errores = [];
       for (const t of tipos) {
         let q = db.from(TABLAS_RESP[t]).delete({ count: 'exact' });
-        q = materiaVal === 'todas' ? q.not('id', 'is', null) : q.eq('materia_id', parseInt(materiaVal));
+        q = usuarioVal === 'todos' ? q.not('id', 'is', null) : q.eq('user_id', usuarioVal);
         const { error, count } = await q;
         if (error) errores.push(NOMBRES_COMP[t] + ': ' + error.message);
         else borradas += count || 0;
