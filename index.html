@@ -1077,6 +1077,7 @@
         <div class="tab-bar">
           <button class="tab-btn active" onclick="adminTab('resultados',this)">📊 Resultados</button>
           <button class="tab-btn" onclick="adminTab('estadisticas',this)">📈 Estadísticas</button>
+          <button class="tab-btn" onclick="adminTab('borrar',this)">🗑 Borrar respuestas</button>
         </div>
 
         <!-- Resultados Tab -->
@@ -1123,27 +1124,6 @@
             </div>
           </div>
 
-          <!-- Borrar respuestas (solo administrador) -->
-          <div class="card mt-3" style="border:1.5px solid #fecaca;">
-            <h3 style="font-family:var(--font-head);margin-bottom:8px;font-size:1.05rem;">🗑 Borrar respuestas</h3>
-            <p style="font-size:.83rem;color:var(--gray2);margin-bottom:16px;">Elimina las respuestas guardadas de un
-              componente para que puedan volver a registrarse. Esta acción no se puede deshacer.</p>
-            <div class="stats-controls" style="margin-bottom:0;">
-              <label for="del-tipo">Componente:</label>
-              <select id="del-tipo">
-                <option value="hetero">Heteroevaluación</option>
-                <option value="auto">Autoevaluación</option>
-                <option value="coe">Coevaluación</option>
-                <option value="todos">Los tres componentes</option>
-              </select>
-              <label for="del-materia">Docente:</label>
-              <select id="del-materia">
-                <option value="todas">Todos los docentes</option>
-              </select>
-              <button class="btn btn-danger btn-sm" id="btn-del" onclick="deleteResponses()">🗑 Borrar
-                respuestas</button>
-            </div>
-          </div>
         </div>
 
         <!-- Estadísticas Tab -->
@@ -1168,6 +1148,30 @@
             </div>
             <div class="chart-wrap">
               <canvas id="main-chart"></canvas>
+            </div>
+          </div>
+        </div>
+        <!-- Borrar respuestas Tab -->
+        <div id="tab-borrar" class="hidden">
+          <!-- Borrar respuestas (solo administrador) -->
+          <div class="card" style="border:1.5px solid #fecaca;">
+            <h3 style="font-family:var(--font-head);margin-bottom:8px;font-size:1.05rem;">🗑 Borrar respuestas</h3>
+            <p style="font-size:.83rem;color:var(--gray2);margin-bottom:16px;">Elimina las respuestas guardadas de un
+              componente para que puedan volver a registrarse. Esta acción no se puede deshacer.</p>
+            <div class="stats-controls" style="margin-bottom:0;">
+              <label for="del-tipo">Componente:</label>
+              <select id="del-tipo">
+                <option value="hetero">Heteroevaluación</option>
+                <option value="auto">Autoevaluación</option>
+                <option value="coe">Coevaluación</option>
+                <option value="todos">Los tres componentes</option>
+              </select>
+              <label for="del-materia">Docente:</label>
+              <select id="del-materia">
+                <option value="todas">Todos los docentes</option>
+              </select>
+              <button class="btn btn-danger btn-sm" id="btn-del" onclick="deleteResponses()">🗑 Borrar
+                respuestas</button>
             </div>
           </div>
         </div>
@@ -1838,7 +1842,7 @@
 
     // ── ADMIN TABS ─────────────────────────────────────────────────────
     function adminTab(tab, btn) {
-      ['tab-resultados', 'tab-estadisticas'].forEach(hide);
+      ['tab-resultados', 'tab-estadisticas', 'tab-borrar'].forEach(hide);
       show('tab-' + tab);
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
