@@ -553,6 +553,17 @@
       font-size: .8rem;
     }
 
+    .subject-meta {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: #eff6ff;
+      color: var(--secondary);
+      font-size: .78rem;
+      font-weight: 600;
+    }
+
     /* Survey */
     .survey-header {
       background: linear-gradient(135deg, var(--secondary), #0a4d91);
@@ -1088,7 +1099,6 @@
           </div>
           <div id="est-questions"></div>
           <div class="actions-bar">
-            <button class="btn btn-secondary" onclick="previewSurvey('hetero')">👁 Previsualizar</button>
             <button class="btn btn-primary" onclick="saveSurvey('hetero')" id="btn-save-hetero">💾 Guardar
               respuestas</button>
             <button class="btn btn-outline" onclick="downloadPDF('hetero')" id="btn-pdf-hetero" disabled>⬇ Descargar
@@ -1116,7 +1126,6 @@
           </div>
           <div id="doc-questions"></div>
           <div class="actions-bar">
-            <button class="btn btn-secondary" onclick="previewSurvey('auto')">👁 Previsualizar</button>
             <button class="btn btn-primary" onclick="saveSurvey('auto')" id="btn-save-auto">💾 Guardar
               respuestas</button>
             <button class="btn btn-outline" onclick="downloadPDF('auto')" id="btn-pdf-auto" disabled>⬇ Descargar
@@ -1144,7 +1153,6 @@
           </div>
           <div id="acad-questions"></div>
           <div class="actions-bar">
-            <button class="btn btn-secondary" onclick="previewSurvey('coe')">👁 Previsualizar</button>
             <button class="btn btn-primary" onclick="saveSurvey('coe')" id="btn-save-coe">💾 Guardar respuestas</button>
             <button class="btn btn-outline" onclick="downloadPDF('coe')" id="btn-pdf-coe" disabled>⬇ Descargar
               PDF</button>
@@ -1160,7 +1168,7 @@
         <div class="tab-bar">
           <button class="tab-btn active" onclick="adminTab('resultados',this)">📊 Resultados</button>
           <button class="tab-btn" onclick="adminTab('usuarios',this)">👥 Usuarios</button>
-          <button class="tab-btn" onclick="adminTab('analisis',this)">🗂 Análisis realizados</button>
+          <button class="tab-btn" onclick="adminTab('analisis',this)">🗂 Historial de análisis</button>
           <button class="tab-btn" onclick="adminTab('borrar',this)">🗑 Borrar respuestas</button>
         </div>
 
@@ -1294,11 +1302,11 @@
             </div>
           </div>
         </div>
-        <!-- Análisis realizados Tab -->
+        <!-- Historial de análisis Tab -->
         <div id="tab-analisis" class="hidden">
           <div class="card">
-            <h3 style="font-family:var(--font-head);margin-bottom:8px;font-size:1.05rem;">Análisis realizados</h3>
-            <p style="font-size:.83rem;color:var(--gray2);margin-bottom:16px;">Historial de los análisis con
+            <h3 style="font-family:var(--font-head);margin-bottom:8px;font-size:1.05rem;">Historial de análisis</h3>
+            <p style="font-size:.83rem;color:var(--gray2);margin-bottom:16px;">Análisis realizados con
               inteligencia artificial, con la fecha, el administrador que los ejecutó y los resultados que se
               analizaron.</p>
             <div class="stats-controls">
@@ -1353,19 +1361,20 @@
         </div>
       </div>
 
-      <!-- Preview Modal -->
+      <!-- Modal de confirmación: vista previa de las respuestas antes de guardar -->
       <div id="modal-preview" class="hidden"
         style="position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:20px;">
         <div
           style="background:#fff;border-radius:16px;padding:28px;max-width:700px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 80px rgba(0,0,0,.3);">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
-            <h3 style="font-family:var(--font-head);font-size:1.1rem;">Vista previa de respuestas</h3>
+            <h3 style="font-family:var(--font-head);font-size:1.1rem;">¿Deseas guardar tus respuestas?</h3>
             <button onclick="closePreview()"
               style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:#666;">✕</button>
           </div>
           <div id="preview-content"></div>
-          <div style="margin-top:18px;text-align:right;">
-            <button class="btn btn-outline" onclick="closePreview()">Cerrar</button>
+          <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="closePreview()">← Seguir editando</button>
+            <button class="btn btn-primary" onclick="confirmarGuardado()">💾 Sí, guardar respuestas</button>
           </div>
         </div>
       </div>
@@ -1559,7 +1568,8 @@
     // ── RENDER MATERIAS (TARJETAS) ─────────────────────────────────────
     // filtro (opcional): función que decide qué materias se muestran
     async function renderSubjects(containerId, tipo, onSelect, filtro) {
-      const [todas, evaluadas] = await Promise.all([getMaterias(), getMisEvaluadas(tipo)]);
+      const [todas, evaluadas, preguntas] = await Promise.all([getMaterias(), getMisEvaluadas(tipo), getPreguntas(tipo)]);
+      const numPreguntas = preguntas.length + (preguntas.length === 1 ? ' pregunta' : ' preguntas');
       const materias = filtro ? todas.filter(filtro) : todas;
       const container = document.getElementById(containerId);
       container.innerHTML = '';
@@ -1576,6 +1586,7 @@
         card.innerHTML = `
       <div class="subject-name">${esc(m.nombre)}</div>
       <div class="subject-prof">${esc(m.profesor_nombre)}</div>
+      <div class="subject-meta">📝 ${numPreguntas}</div>
     `;
         if (!done) card.addEventListener('click', () => onSelect(m));
         container.appendChild(card);
@@ -1688,6 +1699,17 @@
       if (Object.keys(answers).length < allQuestions.length) {
         toast('Por favor responde todas las preguntas', 'err'); return;
       }
+      if (!allQuestions.length) { toast('Este cuestionario no tiene preguntas', 'err'); return; }
+      // Antes de guardar se muestra la vista previa y se pide confirmación
+      mostrarConfirmacion(tipo);
+    }
+
+    // Guarda en la base cuando el usuario confirma en la vista previa
+    let tipoPorGuardar = null;
+    async function confirmarGuardado() {
+      const tipo = tipoPorGuardar;
+      closePreview();
+      if (!tipo) return;
       const btnId = { hetero: 'btn-save-hetero', auto: 'btn-save-auto', coe: 'btn-save-coe' }[tipo];
       const pdfId = { hetero: 'btn-pdf-hetero', auto: 'btn-pdf-auto', coe: 'btn-pdf-coe' }[tipo];
 
@@ -1712,9 +1734,9 @@
       }
     }
 
-    // ── PREVIEW ───────────────────────────────────────────────────────
-    function previewSurvey(tipo) {
-      if (Object.keys(answers).length === 0) { toast('Sin respuestas que previsualizar', 'err'); return; }
+    // ── CONFIRMACIÓN CON VISTA PREVIA ───────────────────────────────────────────────────────
+    function mostrarConfirmacion(tipo) {
+      tipoPorGuardar = tipo;
       const content = document.getElementById('preview-content');
       const rows = allQuestions.map(q => {
         const val = answers[q.id];
@@ -1727,6 +1749,7 @@
     </tr>`;
       }).join('');
       content.innerHTML = `
+    <p style="font-size:.88rem;margin-bottom:10px;">Revisa tus respuestas antes de guardarlas. Una vez guardadas, no podrás modificarlas.</p>
     <p style="font-size:.85rem;color:var(--gray2);margin-bottom:14px;">
       Materia: <strong>${esc(currentMateria?.nombre)}</strong> &nbsp;·&nbsp; Docente: <strong>${esc(currentMateria?.profesor_nombre)}</strong>
     </p>
@@ -1745,6 +1768,7 @@
     function closePreview() {
       const modal = document.getElementById('modal-preview');
       modal.style.display = 'none'; modal.classList.add('hidden');
+      tipoPorGuardar = null;
     }
 
     // ── DESCARGAR PDF ─────────────────────────────────────────────────
@@ -2290,7 +2314,7 @@
       hide('hist-detalle');
     }
 
-    // ── ADMIN: ANÁLISIS REALIZADOS ─────────────────────────────────────
+    // ── ADMIN: HISTORIAL DE ANÁLISIS ─────────────────────────────────────
     let historialIA = [];
 
     function fechaLarga(iso) {
