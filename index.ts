@@ -14,7 +14,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
 // Cambia "*" por la dirección de tu sitio, por ejemplo "https://tu-usuario.github.io"
-const ORIGEN_PERMITIDO = "*";
+const ORIGEN_PERMITIDO = "https://cristian93931.github.io/";
 const MODELO = "gpt-4o-mini";
 const MAX_ANALISIS_POR_HORA = 10;
 const MAX_DOCENTES = 50;
