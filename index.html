@@ -1110,11 +1110,23 @@
             <div style="margin-top:22px;border-top:1px solid #e2e8f0;padding-top:20px;">
               <h4 style="font-family:var(--font-head);font-size:.95rem;margin-bottom:12px;">🤖 Análisis con Inteligencia
                 Artificial (OpenAI)</h4>
-              <p style="font-size:.83rem;color:var(--gray2);margin-bottom:12px;">Ingresa tu API Key de OpenAI para
-                analizar automáticamente los resultados.</p>
-              <div class="key-row">
-                <input type="password" id="openai-key" placeholder="sk-...tu clave de OpenAI..." />
+              <p id="ia-estado" style="font-size:.83rem;color:var(--gray2);margin-bottom:12px;">Comprobando
+                configuración...</p>
+              <!-- Configuración: solo se muestra la primera vez o al cambiar la clave -->
+              <div class="key-row hidden" id="ia-config">
+                <input type="password" id="openai-key" placeholder="sk-...tu clave de OpenAI..."
+                  autocomplete="new-password" spellcheck="false" maxlength="220" />
+                <button class="btn btn-secondary btn-sm" onclick="guardarClaveIA()" id="btn-ia-guardar">🔒 Guardar
+                  clave</button>
+                <button class="btn btn-outline btn-sm hidden" onclick="mostrarConfigIA(false)"
+                  id="btn-ia-cancelar">Cancelar</button>
+              </div>
+              <!-- Acciones: disponibles cuando la clave ya está guardada en el servidor -->
+              <div class="key-row hidden" id="ia-acciones">
                 <button class="btn btn-secondary" onclick="analyzeWithAI()" id="btn-ai">✨ Analizar resultados</button>
+                <button class="btn btn-outline btn-sm" onclick="mostrarConfigIA(true)">Cambiar clave</button>
+                <button class="btn btn-danger btn-sm" onclick="eliminarClaveIA()" id="btn-ia-eliminar">Eliminar
+                  clave</button>
               </div>
               <div id="ai-result" class="hidden">
                 <div class="ai-box">
@@ -1353,6 +1365,7 @@
       hide('app');
       show('page-login');
       document.getElementById('login-pass').value = '';
+      limpiarIA();
       showLoader(false);
     }
 
@@ -1468,7 +1481,7 @@
         div.id = 'qcard-' + q.id;
         div.innerHTML = `
       <div class="question-num">Pregunta ${i + 1} de ${questions.length}</div>
-      <div class="question-text">${q.texto}</div>
+      <div class="question-text">${esc(q.texto)}</div>
       <div class="options-row" id="opts-${q.id}">
         ${OPCIONES.map(o => `
           <button class="option-btn" data-val="${o.val}" data-qid="${q.id}" onclick="selectAnswer(${q.id}, ${o.val}, this)">
@@ -1590,15 +1603,15 @@
         const val = answers[q.id];
         const opc = OPCIONES.find(o => o.val === val);
         return `<tr>
-      <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0;">${q.texto}</td>
+      <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0;">${esc(q.texto)}</td>
       <td style="padding:10px 14px;border-bottom:1px solid #e2e8f0;white-space:nowrap;">
-        ${val !== undefined ? `<strong>${val}</strong> — ${opc ? opc.label : ''}` : '<em style="color:#aaa">Sin respuesta</em>'}
+        ${val !== undefined ? `<strong>${esc(val)}</strong> — ${opc ? esc(opc.label) : ''}` : '<em style="color:#aaa">Sin respuesta</em>'}
       </td>
     </tr>`;
       }).join('');
       content.innerHTML = `
     <p style="font-size:.85rem;color:var(--gray2);margin-bottom:14px;">
-      Materia: <strong>${currentMateria?.nombre}</strong> &nbsp;·&nbsp; Docente: <strong>${currentMateria?.profesor_nombre}</strong>
+      Materia: <strong>${esc(currentMateria?.nombre)}</strong> &nbsp;·&nbsp; Docente: <strong>${esc(currentMateria?.profesor_nombre)}</strong>
     </p>
     <table style="width:100%;border-collapse:collapse;font-size:.88rem;">
       <thead><tr>
@@ -1739,6 +1752,7 @@
 
     async function initAdmin() {
       show('view-admin');
+      loadIAEstado();
       await loadAdminResults();
     }
 
@@ -2019,38 +2033,111 @@
     }
 
     // ── AI ANALYSIS ────────────────────────────────────────────────────
+    // La API Key de OpenAI se guarda una sola vez en el servidor (Edge Function
+    // "analisis-ia"). El navegador nunca la recibe de vuelta ni llama a OpenAI.
+    let iaConfigurada = false;
+
+    async function llamarIA(payload) {
+      const { data, error } = await db.functions.invoke('analisis-ia', { body: payload });
+      if (error) {
+        let msg = error.message || 'Error de conexión';
+        try {
+          const detalle = await error.context.json();
+          if (detalle && detalle.error) msg = detalle.error;
+        } catch (_) { /* la respuesta no traía detalle */ }
+        throw new Error(msg);
+      }
+      if (data && data.error) throw new Error(data.error);
+      return data || {};
+    }
+
+    async function loadIAEstado() {
+      const estado = document.getElementById('ia-estado');
+      estado.textContent = 'Comprobando configuración...';
+      try {
+        const r = await llamarIA({ accion: 'estado' });
+        iaConfigurada = !!r.configurada;
+        estado.textContent = iaConfigurada
+          ? '🔒 API Key configurada (termina en ••••' + r.terminacion + '). Está guardada en el servidor y no se vuelve a solicitar.'
+          : 'Aún no hay una API Key de OpenAI. Ingrésala una sola vez: se guardará en el servidor y no volverá a mostrarse.';
+        mostrarConfigIA(!iaConfigurada);
+      } catch (err) {
+        iaConfigurada = false;
+        estado.textContent = 'No se pudo comprobar la configuración de IA: ' + err.message;
+        hide('ia-config'); hide('ia-acciones');
+      }
+    }
+
+    function mostrarConfigIA(editar) {
+      document.getElementById('openai-key').value = '';
+      toggle('ia-config', editar);
+      toggle('ia-acciones', !editar && iaConfigurada);
+      toggle('btn-ia-cancelar', editar && iaConfigurada);
+    }
+
+    // Borra de la pantalla todo lo relacionado con la IA (al cerrar sesión)
+    function limpiarIA() {
+      iaConfigurada = false;
+      document.getElementById('openai-key').value = '';
+      document.getElementById('ai-text').textContent = '';
+      hide('ai-result'); hide('ia-config'); hide('ia-acciones');
+    }
+
+    async function guardarClaveIA() {
+      const input = document.getElementById('openai-key');
+      const clave = input.value.trim();
+      if (!/^sk-[A-Za-z0-9_\-]{20,200}$/.test(clave)) {
+        toast('La API Key no tiene un formato válido (debe empezar con sk-)', 'err'); return;
+      }
+      const btn = document.getElementById('btn-ia-guardar');
+      btn.disabled = true; btn.textContent = '⏳ Verificando...';
+      try {
+        await llamarIA({ accion: 'guardar_clave', clave });
+        input.value = '';
+        toast('API Key guardada correctamente ✓', 'ok');
+        await loadIAEstado();
+      } catch (err) {
+        toast('No se pudo guardar: ' + err.message, 'err');
+      } finally {
+        btn.disabled = false; btn.textContent = '🔒 Guardar clave';
+      }
+    }
+
+    async function eliminarClaveIA() {
+      if (!confirm('Vas a eliminar la API Key guardada. El análisis con IA dejará de funcionar hasta que configures otra. ¿Deseas continuar?')) return;
+      const btn = document.getElementById('btn-ia-eliminar');
+      btn.disabled = true;
+      try {
+        await llamarIA({ accion: 'eliminar_clave' });
+        toast('API Key eliminada', 'ok');
+        hide('ai-result');
+        await loadIAEstado();
+      } catch (err) {
+        toast('No se pudo eliminar: ' + err.message, 'err');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
     async function analyzeWithAI() {
-      const apiKey = document.getElementById('openai-key').value.trim();
-      if (!apiKey) { toast('Ingresa tu API Key de OpenAI', 'err'); return; }
+      if (!iaConfigurada) { toast('Primero configura la API Key de OpenAI', 'err'); return; }
       if (!adminData.length) { toast('Carga los resultados primero', 'err'); return; }
 
       const btn = document.getElementById('btn-ai');
       btn.disabled = true; btn.textContent = '⏳ Analizando...';
 
-      const tableText = adminData.map(d =>
-        `- ${d.materia.profesor_nombre}: Heteroevaluación=${d.hetero.toFixed(2)}, Autoevaluación=${d.auto.toFixed(2)}, Coevaluación=${d.coe.toFixed(2)}, Total=${d.total.toFixed(2)}, Calificación=${d.cal}`
-      ).join('\n');
-
-      const prompt = `Eres un experto en evaluación docente de instituciones de educación superior. Analiza los siguientes resultados de evaluación docente y proporciona un análisis detallado, constructivo y profesional en español. Incluye: 1) Análisis general del proceso evaluativo, 2) Fortalezas identificadas en cada docente, 3) Áreas de mejora, 4) Recomendaciones institucionales concretas.\n\nResultados:\n${tableText}\n\nEscala: 0-50 Deficiente, 51-80 Bueno, 81-90 Muy Bueno, 91-100 Excelente. Los instrumentos son: Heteroevaluación (30 pts, por estudiantes), Autoevaluación (10 pts, por docentes), Coevaluación (60 pts, por personal académico).`;
+      // Solo se envían los datos; el servidor los valida y arma la consulta a OpenAI
+      const resultados = adminData.map(d => ({
+        docente: d.materia.profesor_nombre, hetero: d.hetero, auto: d.auto, coe: d.coe
+      }));
 
       try {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-          body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: [{ role: 'user', content: prompt }],
-            max_tokens: 1200, temperature: 0.7
-          })
-        });
-        const json = await response.json();
-        if (json.error) throw new Error(json.error.message);
-        const text = json.choices?.[0]?.message?.content || 'Sin respuesta';
-        document.getElementById('ai-text').textContent = text;
+        const r = await llamarIA({ accion: 'analizar', resultados });
+        document.getElementById('ai-text').textContent = r.texto || 'Sin respuesta';
         show('ai-result');
         toast('Análisis completado ✓', 'ok');
       } catch (err) {
-        toast('Error con OpenAI: ' + err.message, 'err');
+        toast('Error en el análisis: ' + err.message, 'err');
       } finally {
         btn.disabled = false; btn.textContent = '✨ Analizar resultados';
       }
