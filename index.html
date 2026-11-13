@@ -822,8 +822,77 @@
       font-size: .9rem;
       line-height: 1.7;
       color: var(--dark);
-      white-space: pre-wrap;
       word-break: break-word;
+    }
+
+    /* Texto del análisis (markdown convertido a HTML) */
+    .ai-content h3,
+    .ai-content h4,
+    .ai-content h5 {
+      font-family: var(--font-head);
+      color: var(--dark);
+      line-height: 1.35;
+      margin: 20px 0 8px;
+    }
+
+    .ai-content h3 {
+      font-size: 1.05rem;
+      color: var(--secondary);
+      padding-bottom: 6px;
+      border-bottom: 1px solid #bfdbfe;
+    }
+
+    .ai-content h4 {
+      font-size: .97rem;
+    }
+
+    .ai-content h5 {
+      font-size: .9rem;
+    }
+
+    .ai-content> :first-child {
+      margin-top: 0;
+    }
+
+    .ai-content> :last-child {
+      margin-bottom: 0;
+    }
+
+    .ai-content p {
+      margin: 0 0 10px;
+    }
+
+    .ai-content ul,
+    .ai-content ol {
+      margin: 0 0 12px;
+      padding-left: 24px;
+    }
+
+    .ai-content li {
+      margin-bottom: 5px;
+    }
+
+    .ai-content li>ul,
+    .ai-content li>ol {
+      margin: 6px 0 4px;
+    }
+
+    .ai-content strong {
+      font-weight: 700;
+      color: var(--dark);
+    }
+
+    .ai-content hr {
+      border: none;
+      border-top: 1px solid #bfdbfe;
+      margin: 16px 0;
+    }
+
+    .ai-content code {
+      background: #dbeafe;
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-size: .85em;
     }
 
     .ai-box h4 {
@@ -1131,7 +1200,7 @@
               <div id="ai-result" class="hidden">
                 <div class="ai-box">
                   <h4>📋 Análisis de Resultados</h4>
-                  <div id="ai-text"></div>
+                  <div id="ai-text" class="ai-content"></div>
                 </div>
               </div>
             </div>
@@ -2037,6 +2106,77 @@
     // "analisis-ia"). El navegador nunca la recibe de vuelta ni llama a OpenAI.
     let iaConfigurada = false;
 
+    // Convierte el markdown que devuelve la IA en HTML para mostrarlo con formato.
+    // Primero se escapa todo el texto, de modo que solo se generan las etiquetas
+    // de esta función (títulos, listas, negrita, cursiva) y nunca HTML ajeno.
+    function mdToHtml(texto) {
+      const inline = t => esc(t)
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/__([^_]+?)__/g, '<strong>$1</strong>')
+        .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?![*\w])/g, '$1<em>$2</em>');
+
+      const lineas = String(texto).replace(/\r/g, '').trim().split('\n');
+      // El título de mayor jerarquía que use la IA (sea #, ## o ###) se muestra como principal
+      const niveles = lineas.map(l => (l.match(/^\s*(#{1,6})\s+\S/) || [])[1]).filter(Boolean).map(h => h.length);
+      const nivelBase = niveles.length ? Math.min(...niveles) : 1;
+
+      let html = '';
+      let parrafo = [];
+      const listas = []; // pila de listas abiertas: { sangria, tag }
+
+      const cerrarParrafo = () => {
+        if (parrafo.length) { html += '<p>' + parrafo.join(' ') + '</p>'; parrafo = []; }
+      };
+      const cerrarListas = (hasta = 0) => {
+        while (listas.length > hasta) html += '</li></' + listas.pop().tag + '>';
+      };
+
+      lineas.forEach(linea => {
+        const item = linea.match(/^(\s*)([-*+•]|\d+[.)])\s+(.*)$/);
+        const titulo = linea.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/);
+
+        if (!linea.trim()) { cerrarParrafo(); return; }
+
+        if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(linea)) {
+          cerrarParrafo(); cerrarListas(); html += '<hr>'; return;
+        }
+
+        if (titulo) {
+          cerrarParrafo(); cerrarListas();
+          const nivel = Math.min(titulo[1].length - nivelBase + 3, 5); // principal → h3, luego h4 y h5
+          html += '<h' + nivel + '>' + inline(titulo[2]) + '</h' + nivel + '>';
+          return;
+        }
+
+        if (item) {
+          cerrarParrafo();
+          const sangria = item[1].replace(/\t/g, '    ').length;
+          const numero = parseInt(item[2], 10);
+          const tag = Number.isNaN(numero) ? 'ul' : 'ol';
+          while (listas.length && listas[listas.length - 1].sangria > sangria) cerrarListas(listas.length - 1);
+          const actual = listas[listas.length - 1];
+          if (actual && actual.sangria === sangria && actual.tag === tag) {
+            html += '</li>';
+          } else {
+            if (actual && actual.sangria === sangria) cerrarListas(listas.length - 1);
+            html += tag === 'ol' ? '<ol start="' + numero + '">' : '<ul>';
+            listas.push({ sangria, tag });
+          }
+          html += '<li>' + inline(item[3]);
+          return;
+        }
+
+        // Texto normal: si está sangrado dentro de una lista, continúa el elemento
+        if (listas.length && /^\s+/.test(linea)) { html += ' ' + inline(linea.trim()); return; }
+        cerrarListas();
+        parrafo.push(inline(linea.trim()));
+      });
+
+      cerrarParrafo(); cerrarListas();
+      return html;
+    }
+
     async function llamarIA(payload) {
       const { data, error } = await db.functions.invoke('analisis-ia', { body: payload });
       if (error) {
@@ -2133,7 +2273,7 @@
 
       try {
         const r = await llamarIA({ accion: 'analizar', resultados });
-        document.getElementById('ai-text').textContent = r.texto || 'Sin respuesta';
+        document.getElementById('ai-text').innerHTML = mdToHtml(r.texto || 'Sin respuesta');
         show('ai-result');
         toast('Análisis completado ✓', 'ok');
       } catch (err) {
