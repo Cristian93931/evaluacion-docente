@@ -1160,6 +1160,7 @@
         <div class="tab-bar">
           <button class="tab-btn active" onclick="adminTab('resultados',this)">📊 Resultados</button>
           <button class="tab-btn" onclick="adminTab('usuarios',this)">👥 Usuarios</button>
+          <button class="tab-btn" onclick="adminTab('analisis',this)">🗂 Análisis realizados</button>
           <button class="tab-btn" onclick="adminTab('borrar',this)">🗑 Borrar respuestas</button>
         </div>
 
@@ -1292,6 +1293,39 @@
               </table>
             </div>
           </div>
+        </div>
+        <!-- Análisis realizados Tab -->
+        <div id="tab-analisis" class="hidden">
+          <div class="card">
+            <h3 style="font-family:var(--font-head);margin-bottom:8px;font-size:1.05rem;">Análisis realizados</h3>
+            <p style="font-size:.83rem;color:var(--gray2);margin-bottom:16px;">Historial de los análisis con
+              inteligencia artificial, con la fecha, el administrador que los ejecutó y los resultados que se
+              analizaron.</p>
+            <div class="stats-controls">
+              <button class="btn btn-outline btn-sm" onclick="loadHistorial()">↻ Actualizar</button>
+              <span id="hist-resumen" style="font-size:.88rem;font-weight:600;"></span>
+            </div>
+            <div class="results-table-wrap">
+              <table class="results-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Administrador</th>
+                    <th>Docentes analizados</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="hist-body">
+                  <tr>
+                    <td colspan="4" style="text-align:center;color:var(--gray2);padding:28px;">Cargando análisis...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Detalle del análisis seleccionado -->
+          <div class="card mt-3 hidden" id="hist-detalle"></div>
         </div>
         <!-- Borrar respuestas Tab -->
         <div id="tab-borrar" class="hidden">
@@ -2070,12 +2104,13 @@
 
     // ── ADMIN TABS ─────────────────────────────────────────────────────
     function adminTab(tab, btn) {
-      ['tab-resultados', 'tab-usuarios', 'tab-borrar'].forEach(hide);
+      ['tab-resultados', 'tab-usuarios', 'tab-analisis', 'tab-borrar'].forEach(hide);
       show('tab-' + tab);
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (tab === 'resultados') renderChart(); // la gráfica necesita estar visible para dibujarse
       if (tab === 'usuarios' || tab === 'borrar') loadAdminResults();
+      if (tab === 'analisis') loadHistorial();
     }
 
     // ── CHART ─────────────────────────────────────────────────────────
@@ -2249,6 +2284,92 @@
       document.getElementById('openai-key').value = '';
       document.getElementById('ai-text').textContent = '';
       hide('ai-result'); hide('ia-config'); hide('ia-acciones');
+      historialIA = [];
+      document.getElementById('hist-body').innerHTML = '';
+      document.getElementById('hist-detalle').innerHTML = '';
+      hide('hist-detalle');
+    }
+
+    // ── ADMIN: ANÁLISIS REALIZADOS ─────────────────────────────────────
+    let historialIA = [];
+
+    function fechaLarga(iso) {
+      const f = new Date(iso);
+      return isNaN(f) ? '—' : f.toLocaleString('es-EC', { dateStyle: 'long', timeStyle: 'short' });
+    }
+
+    async function loadHistorial() {
+      const tbody = document.getElementById('hist-body');
+      const mensaje = t => '<tr><td colspan="4" style="text-align:center;color:var(--gray2);padding:28px;">' + esc(t) + '</td></tr>';
+      tbody.innerHTML = mensaje('Cargando análisis...');
+      document.getElementById('hist-resumen').textContent = '';
+      hide('hist-detalle');
+      try {
+        const r = await llamarIA({ accion: 'historial' });
+        historialIA = Array.isArray(r.analisis) ? r.analisis : [];
+      } catch (err) {
+        historialIA = [];
+        tbody.innerHTML = mensaje('No se pudo cargar el historial: ' + err.message);
+        return;
+      }
+      if (!historialIA.length) { tbody.innerHTML = mensaje('Aún no se ha realizado ningún análisis'); return; }
+
+      document.getElementById('hist-resumen').textContent =
+        historialIA.length + (historialIA.length === 1 ? ' análisis guardado' : ' análisis guardados');
+      tbody.innerHTML = historialIA.map(a => `
+    <tr id="hist-fila-${Number(a.id)}">
+      <td style="white-space:nowrap;">${esc(fechaLarga(a.created_at))}</td>
+      <td>${esc(a.administrador_nombre)}<br><span style="color:var(--gray2);font-weight:400;font-size:.82rem;">${esc(a.administrador_correo || '')}</span></td>
+      <td>${Array.isArray(a.datos) ? a.datos.length : 0}</td>
+      <td style="text-align:right;"><button class="btn btn-secondary btn-sm" onclick="verAnalisis(${Number(a.id)})">Ver análisis</button></td>
+    </tr>`).join('');
+    }
+
+    function verAnalisis(id) {
+      const a = historialIA.find(x => Number(x.id) === id);
+      if (!a) return;
+      const num = v => (Number(v) || 0).toFixed(2);
+      const filas = (Array.isArray(a.datos) ? a.datos : []).map(d => `
+    <tr>
+      <td>${esc(d.docente)}</td>
+      <td>${num(d.heteroevaluacion)}</td>
+      <td>${num(d.autoevaluacion)}</td>
+      <td>${num(d.coevaluacion)}</td>
+      <td><strong>${num(d.total)}</strong></td>
+      <td><span class="badge-cal ${calClass(d.calificacion)}">${esc(d.calificacion)}</span></td>
+    </tr>`).join('');
+
+      const detalle = document.getElementById('hist-detalle');
+      detalle.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+      <div>
+        <h3 style="font-family:var(--font-head);font-size:1.05rem;margin-bottom:6px;">Análisis del ${esc(fechaLarga(a.created_at))}</h3>
+        <p style="font-size:.85rem;color:var(--gray2);">
+          Ejecutado por <strong style="color:var(--dark);">${esc(a.administrador_nombre)}</strong>
+          ${a.administrador_correo ? ' (' + esc(a.administrador_correo) + ')' : ''} &nbsp;·&nbsp; Modelo: ${esc(a.modelo)}
+        </p>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="cerrarAnalisis()">✕ Cerrar</button>
+    </div>
+    <h4 style="font-family:var(--font-head);font-size:.92rem;margin-bottom:10px;">Tabla de Evaluación Docente Final analizada</h4>
+    <div class="results-table-wrap">
+      <table class="results-table">
+        <thead><tr><th>Docente</th><th>Heteroevaluación</th><th>Autoevaluación</th><th>Coevaluación</th><th>Total</th><th>Calificación</th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="6" style="text-align:center;color:var(--gray2);">Sin datos</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="ai-box"><div class="ai-content">${mdToHtml(a.resultado || 'Sin contenido')}</div></div>`;
+
+      document.querySelectorAll('#hist-body tr').forEach(tr => { tr.style.background = ''; });
+      const fila = document.getElementById('hist-fila-' + id);
+      if (fila) fila.style.background = '#eff6ff';
+      show('hist-detalle');
+      detalle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function cerrarAnalisis() {
+      hide('hist-detalle');
+      document.querySelectorAll('#hist-body tr').forEach(tr => { tr.style.background = ''; });
     }
 
     async function guardarClaveIA() {
