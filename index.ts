@@ -1,19 +1,5 @@
-// ============================================================================
-// Edge Function: analisis-ia
-// Guarda la API Key de OpenAI en el servidor (una sola vez) y ejecuta el
-// análisis de resultados sin que la clave llegue nunca al navegador.
-//
-// Acciones (POST, JSON):
-//   { accion: "estado" }                      → ¿hay clave configurada?
-//   { accion: "guardar_clave", clave }        → valida y guarda la clave
-//   { accion: "eliminar_clave" }              → borra la clave
-//   { accion: "analizar", resultados: [...] } → análisis con OpenAI
-//
-// Solo responde a usuarios autenticados con rol "administrador".
-// ============================================================================
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-// Cambia "*" por la dirección de tu sitio, por ejemplo "https://tu-usuario.github.io"
 const ORIGEN_PERMITIDO = "https://cristian93931.github.io/";
 const MODELO = "gpt-4o-mini";
 const MAX_ANALISIS_POR_HORA = 10;
