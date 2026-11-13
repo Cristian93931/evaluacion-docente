@@ -960,8 +960,22 @@
       transition: border .2s;
     }
 
-    .stats-controls select:focus {
+    .stats-controls select:focus,
+    .stats-controls input[type="search"]:focus {
       border-color: var(--secondary);
+    }
+
+    .stats-controls input[type="search"] {
+      flex: 1;
+      min-width: 220px;
+      max-width: 340px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      border: 1.5px solid #e2e8f0;
+      font-family: var(--font-body);
+      font-size: .88rem;
+      outline: none;
+      transition: border .2s;
     }
 
     /* Responsive */
@@ -1145,7 +1159,6 @@
 
         <div class="tab-bar">
           <button class="tab-btn active" onclick="adminTab('resultados',this)">📊 Resultados</button>
-          <button class="tab-btn" onclick="adminTab('estadisticas',this)">📈 Estadísticas</button>
           <button class="tab-btn" onclick="adminTab('usuarios',this)">👥 Usuarios</button>
           <button class="tab-btn" onclick="adminTab('borrar',this)">🗑 Borrar respuestas</button>
         </div>
@@ -1205,11 +1218,8 @@
             </div>
           </div>
 
-        </div>
-
-        <!-- Estadísticas Tab -->
-        <div id="tab-estadisticas" class="hidden">
-          <div class="card">
+          <!-- Estadísticas (antes en una pestaña aparte) -->
+          <div class="card mt-3">
             <h3 style="font-family:var(--font-head);margin-bottom:16px;font-size:1.05rem;">Estadísticas de Evaluación
             </h3>
             <div class="stats-controls">
@@ -1231,7 +1241,9 @@
               <canvas id="main-chart"></canvas>
             </div>
           </div>
+
         </div>
+
         <!-- Usuarios Tab -->
         <div id="tab-usuarios" class="hidden">
           <div class="card">
@@ -1240,6 +1252,9 @@
             <p style="font-size:.83rem;color:var(--gray2);margin-bottom:16px;">Estudiantes resuelven la
               heteroevaluación, docentes la autoevaluación y el personal académico la coevaluación.</p>
             <div class="stats-controls">
+              <label for="seg-buscar">Buscar:</label>
+              <input type="search" id="seg-buscar" placeholder="Nombre, rol, materia o docente..."
+                oninput="renderSeguimiento()" autocomplete="off" maxlength="80" />
               <label for="seg-rol">Rol:</label>
               <select id="seg-rol" onchange="renderSeguimiento()">
                 <option value="todos">Todos</option>
@@ -1995,12 +2010,25 @@
         });
     }
 
+    function normalizar(t) {
+      return String(t ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    }
+
     function renderSeguimiento() {
       const rol = document.getElementById('seg-rol').value;
       const estado = document.getElementById('seg-estado').value;
       const tbody = document.getElementById('seg-body');
+      // Búsqueda sin distinguir mayúsculas ni tildes; deben coincidir todas las palabras
+      const terminos = normalizar(document.getElementById('seg-buscar').value).split(/\s+/).filter(Boolean);
 
       const filas = seguimientoData.filter(d => {
+        if (terminos.length) {
+          const texto = normalizar([
+            d.perfil.nombre, ROL_LABEL[d.perfil.rol], NOMBRES_COMP[d.tipo],
+            ...d.pendientes.map(m => m.nombre + ' ' + m.profesor_nombre)
+          ].join(' '));
+          if (!terminos.every(t => texto.includes(t))) return false;
+        }
         if (rol !== 'todos' && d.perfil.rol !== rol) return false;
         if (estado === 'pendientes' && d.pendientes.length === 0) return false;
         if (estado === 'completados' && d.pendientes.length > 0) return false;
@@ -2011,7 +2039,8 @@
       document.getElementById('seg-resumen').textContent =
         seguimientoData.length + ' usuarios con evaluación asignada · ' +
         conPendientes + ' con evaluaciones por resolver · ' +
-        (seguimientoData.length - conPendientes) + ' completados';
+        (seguimientoData.length - conPendientes) + ' completados' +
+        (filas.length !== seguimientoData.length ? ' · mostrando ' + filas.length + ' de ' + seguimientoData.length : '');
 
       if (!filas.length) {
         tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--gray2);padding:28px;">Sin usuarios para este filtro</td></tr>';
@@ -2041,11 +2070,11 @@
 
     // ── ADMIN TABS ─────────────────────────────────────────────────────
     function adminTab(tab, btn) {
-      ['tab-resultados', 'tab-estadisticas', 'tab-usuarios', 'tab-borrar'].forEach(hide);
+      ['tab-resultados', 'tab-usuarios', 'tab-borrar'].forEach(hide);
       show('tab-' + tab);
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      if (tab === 'estadisticas') renderChart();
+      if (tab === 'resultados') renderChart(); // la gráfica necesita estar visible para dibujarse
       if (tab === 'usuarios' || tab === 'borrar') loadAdminResults();
     }
 
@@ -2274,7 +2303,8 @@
         const r = await llamarIA({ accion: 'analizar', resultados });
         document.getElementById('ai-text').innerHTML = mdToHtml(r.texto || 'Sin respuesta');
         show('ai-result');
-        toast('Análisis completado ✓', 'ok');
+        if (r.guardado) toast('Análisis completado y guardado ✓', 'ok');
+        else toast('Análisis completado, pero no se pudo guardar en la base de datos', 'err');
       } catch (err) {
         toast('Error en el análisis: ' + err.message, 'err');
       } finally {
