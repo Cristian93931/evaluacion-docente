@@ -989,6 +989,117 @@
       transition: border .2s;
     }
 
+    /* Admin: evaluaciones (preguntas por componente) */
+    .comp-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      margin-bottom: 22px;
+    }
+
+    .comp-card {
+      text-align: left;
+      background: #f8fafc;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 14px 16px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      transition: all .2s;
+    }
+
+    .comp-card:hover {
+      border-color: var(--secondary);
+    }
+
+    .comp-card.active {
+      background: #eff6ff;
+      border-color: var(--secondary);
+      box-shadow: 0 4px 12px rgba(17, 119, 209, .15);
+    }
+
+    .comp-card .comp-name {
+      font-family: var(--font-head);
+      font-weight: 700;
+      font-size: .98rem;
+      color: var(--dark);
+    }
+
+    .comp-card .comp-rol {
+      font-size: .82rem;
+      color: var(--gray2);
+      margin-top: 2px;
+    }
+
+    .comp-card .comp-count {
+      display: inline-block;
+      margin-top: 8px;
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--secondary);
+    }
+
+    .ev-form {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+
+    .ev-form label {
+      width: 100%;
+      font-weight: 600;
+      font-size: .88rem;
+      color: var(--gray2);
+    }
+
+    .ev-textarea {
+      flex: 1;
+      min-width: 240px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1.5px solid #e2e8f0;
+      font-family: var(--font-body);
+      font-size: .92rem;
+      line-height: 1.45;
+      outline: none;
+      resize: vertical;
+      transition: border .2s;
+    }
+
+    .ev-textarea:focus {
+      border-color: var(--secondary);
+    }
+
+    .ev-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: nowrap;
+      justify-content: flex-end;
+    }
+
+    .btn-icon {
+      padding: 6px 10px;
+      font-size: .8rem;
+      border-radius: 8px;
+      background: #f1f5f9;
+      color: var(--dark);
+      border: 1px solid #e2e8f0;
+    }
+
+    .btn-icon:hover {
+      background: #e2e8f0;
+    }
+
+    .btn-icon.danger {
+      color: var(--danger);
+    }
+
+    .ev-inactiva td {
+      color: var(--gray2);
+    }
+
     /* Responsive */
     @media (max-width: 640px) {
       .main-content {
@@ -1167,6 +1278,7 @@
 
         <div class="tab-bar">
           <button class="tab-btn active" onclick="adminTab('resultados',this)">📊 Resultados</button>
+          <button class="tab-btn" onclick="adminTab('evaluaciones',this)">📝 Evaluaciones</button>
           <button class="tab-btn" onclick="adminTab('usuarios',this)">👥 Usuarios</button>
           <button class="tab-btn" onclick="adminTab('analisis',this)">🗂 Historial de análisis</button>
           <button class="tab-btn" onclick="adminTab('borrar',this)">🗑 Borrar respuestas</button>
@@ -1251,6 +1363,44 @@
             </div>
           </div>
 
+        </div>
+
+        <!-- Evaluaciones Tab: preguntas de cada componente -->
+        <div id="tab-evaluaciones" class="hidden">
+          <div class="card">
+            <h3 style="font-family:var(--font-head);margin-bottom:8px;font-size:1.05rem;">Evaluaciones por componente</h3>
+            <p style="font-size:.83rem;color:var(--gray2);margin-bottom:18px;">Crea, edita o elimina las preguntas de
+              cada evaluación. Las preguntas activas aparecen en el panel del rol que corresponde: estudiantes
+              (heteroevaluación), docentes (autoevaluación) y personal académico (coevaluación).</p>
+            <div class="comp-grid" id="ev-componentes"></div>
+            <div class="ev-form">
+              <label for="ev-nueva">Nueva pregunta para la <span id="ev-comp-nombre">Heteroevaluación</span></label>
+              <textarea class="ev-textarea" id="ev-nueva" rows="2" maxlength="500"
+                placeholder="Escribe el enunciado de la pregunta..."></textarea>
+              <button class="btn btn-primary btn-sm" id="btn-ev-agregar" onclick="agregarPregunta()">＋ Agregar
+                pregunta</button>
+            </div>
+            <p id="ev-resumen" style="font-size:.88rem;font-weight:600;margin-bottom:14px;"></p>
+            <div class="results-table-wrap">
+              <table class="results-table">
+                <thead>
+                  <tr>
+                    <th>N.º</th>
+                    <th>Pregunta</th>
+                    <th>Respuestas</th>
+                    <th>Estado</th>
+                    <th style="text-align:right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="ev-body">
+                  <tr>
+                    <td colspan="5" style="text-align:center;color:var(--gray2);padding:28px;">Cargando preguntas...
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
         <!-- Usuarios Tab -->
@@ -1375,6 +1525,29 @@
           <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;">
             <button class="btn btn-outline" onclick="closePreview()">← Seguir editando</button>
             <button class="btn btn-primary" onclick="confirmarGuardado()">💾 Sí, guardar respuestas</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal para editar una pregunta (administrador) -->
+      <div id="modal-pregunta" class="hidden"
+        style="position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:20px;">
+        <div
+          style="background:#fff;border-radius:16px;padding:28px;max-width:620px;width:100%;box-shadow:0 24px 80px rgba(0,0,0,.3);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <h3 style="font-family:var(--font-head);font-size:1.1rem;" id="ev-edit-titulo">Editar pregunta</h3>
+            <button onclick="cerrarEdicion()"
+              style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:#666;">✕</button>
+          </div>
+          <textarea class="ev-textarea" id="ev-edit-texto" rows="4" maxlength="500" style="width:100%;"></textarea>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:14px;font-size:.9rem;cursor:pointer;">
+            <input type="checkbox" id="ev-edit-activa" />
+            <span id="ev-edit-activa-label">Activa</span>
+          </label>
+          <p id="ev-edit-aviso" style="font-size:.82rem;color:#854d0e;margin-top:10px;"></p>
+          <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:12px;flex-wrap:wrap;">
+            <button class="btn btn-outline" onclick="cerrarEdicion()">Cancelar</button>
+            <button class="btn btn-primary" id="btn-ev-guardar" onclick="guardarEdicion()">💾 Guardar cambios</button>
           </div>
         </div>
       </div>
@@ -1573,6 +1746,12 @@
       const materias = filtro ? todas.filter(filtro) : todas;
       const container = document.getElementById(containerId);
       container.innerHTML = '';
+
+      if (!preguntas.length) {
+        container.innerHTML = '<p style="color:var(--gray2);">Aún no hay preguntas publicadas para la ' +
+          esc(NOMBRES_COMP[tipo]) + '. Vuelve a ingresar más tarde.</p>';
+        return;
+      }
 
       if (!materias.length) {
         container.innerHTML = '<p style="color:var(--gray2);">No tienes materias asignadas para evaluar.</p>';
@@ -2128,13 +2307,231 @@
 
     // ── ADMIN TABS ─────────────────────────────────────────────────────
     function adminTab(tab, btn) {
-      ['tab-resultados', 'tab-usuarios', 'tab-analisis', 'tab-borrar'].forEach(hide);
+      ['tab-resultados', 'tab-evaluaciones', 'tab-usuarios', 'tab-analisis', 'tab-borrar'].forEach(hide);
       show('tab-' + tab);
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       if (tab === 'resultados') renderChart(); // la gráfica necesita estar visible para dibujarse
       if (tab === 'usuarios' || tab === 'borrar') loadAdminResults();
       if (tab === 'analisis') loadHistorial();
+      if (tab === 'evaluaciones') loadPreguntasAdmin();
+    }
+
+    // ── ADMIN: EVALUACIONES (PREGUNTAS DE CADA COMPONENTE) ─────────────
+    // Cada componente es la evaluación de un rol: las preguntas activas de
+    // ese tipo son las que el rol ve en su panel (getPreguntas).
+    const PANEL_DE = { hetero: 'los estudiantes', auto: 'los docentes', coe: 'el personal académico' };
+    const DEL_PANEL = { hetero: 'de los estudiantes', auto: 'de los docentes', coe: 'del personal académico' };
+    let evTipo = 'hetero';
+    let preguntasAdmin = [];
+    let respuestasPorPregunta = {};   // pregunta_id → número de respuestas registradas
+    let preguntaEditando = null;
+
+    function esAdmin() {
+      if (currentProfile && currentProfile.rol === 'administrador') return true;
+      toast('Solo el administrador puede modificar las evaluaciones', 'err');
+      return false;
+    }
+
+    function preguntasDe(tipo) {
+      return preguntasAdmin.filter(p => p.tipo === tipo)
+        .sort((a, b) => (a.orden - b.orden) || (a.id - b.id));
+    }
+
+    async function loadPreguntasAdmin() {
+      const tbody = document.getElementById('ev-body');
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--gray2);padding:28px;">Cargando preguntas...</td></tr>';
+      try {
+        const [pregs, resps] = await Promise.all([
+          fetchAll('preguntas', 'id, tipo, texto, orden, activa'),
+          fetchAll('respuestas', 'id, pregunta_id')
+        ]);
+        preguntasAdmin = pregs;
+        respuestasPorPregunta = {};
+        resps.forEach(r => { respuestasPorPregunta[r.pregunta_id] = (respuestasPorPregunta[r.pregunta_id] || 0) + 1; });
+      } catch (err) {
+        console.error('Error al cargar preguntas:', err);
+        toast('Error al cargar las preguntas: ' + err.message, 'err');
+        preguntasAdmin = [];
+        respuestasPorPregunta = {};
+      }
+      renderEvaluacionesAdmin();
+    }
+
+    function seleccionarComponente(tipo) {
+      evTipo = tipo;
+      document.getElementById('ev-nueva').value = '';
+      renderEvaluacionesAdmin();
+    }
+
+    function renderEvaluacionesAdmin() {
+      // Tarjetas de los tres componentes
+      document.getElementById('ev-componentes').innerHTML = TIPOS.map(t => {
+        const lista = preguntasDe(t);
+        const activas = lista.filter(p => p.activa).length;
+        return `
+      <button class="comp-card${t === evTipo ? ' active' : ''}" onclick="seleccionarComponente('${t}')">
+        <div class="comp-name">${esc(NOMBRES_COMP[t])} · ${PESO_COMP[t]} pts</div>
+        <div class="comp-rol">Aparece en el panel ${esc(DEL_PANEL[t])}</div>
+        <span class="comp-count">${activas} activa${activas === 1 ? '' : 's'} de ${lista.length}</span>
+      </button>`;
+      }).join('');
+
+      document.getElementById('ev-comp-nombre').textContent = NOMBRES_COMP[evTipo];
+
+      const lista = preguntasDe(evTipo);
+      const activas = lista.filter(p => p.activa).length;
+      document.getElementById('ev-resumen').textContent = activas
+        ? `${NOMBRES_COMP[evTipo]}: ${activas} pregunta${activas === 1 ? '' : 's'} visible${activas === 1 ? '' : 's'} para ${PANEL_DE[evTipo]}.`
+        : `${NOMBRES_COMP[evTipo]}: no hay preguntas activas; esta evaluación no aparecerá para ${PANEL_DE[evTipo]}.`;
+
+      const tbody = document.getElementById('ev-body');
+      if (!lista.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--gray2);padding:28px;">Esta evaluación aún no tiene preguntas. Agrega la primera arriba.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = lista.map((p, i) => {
+        const n = respuestasPorPregunta[p.id] || 0;
+        const id = Number(p.id);
+        const estado = p.activa
+          ? '<span class="badge-cal cal-excelente">Activa</span>'
+          : '<span class="badge-cal" style="background:#e2e8f0;color:#475569;">Inactiva</span>';
+        return `
+    <tr class="${p.activa ? '' : 'ev-inactiva'}">
+      <td>${i + 1}</td>
+      <td style="font-weight:400;line-height:1.45;min-width:260px;">${esc(p.texto)}</td>
+      <td>${n}</td>
+      <td>${estado}</td>
+      <td>
+        <div class="ev-actions">
+          <button class="btn btn-icon" title="Subir" onclick="moverPregunta(${id}, -1)" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="btn btn-icon" title="Bajar" onclick="moverPregunta(${id}, 1)" ${i === lista.length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="btn btn-icon" title="Editar" onclick="editarPregunta(${id})">✏️</button>
+          <button class="btn btn-icon" onclick="toggleActiva(${id})">${p.activa ? 'Desactivar' : 'Activar'}</button>
+          <button class="btn btn-icon danger" title="Eliminar" onclick="eliminarPregunta(${id})">🗑</button>
+        </div>
+      </td>
+    </tr>`;
+      }).join('');
+    }
+
+    function validarTexto(texto, idActual) {
+      if (texto.length < 5) { toast('Escribe una pregunta de al menos 5 caracteres', 'err'); return false; }
+      if (texto.length > 500) { toast('La pregunta no puede superar los 500 caracteres', 'err'); return false; }
+      const repetida = preguntasDe(evTipo).some(p => p.id !== idActual && normalizar(p.texto).trim() === normalizar(texto));
+      if (repetida) { toast('Esa pregunta ya existe en esta evaluación', 'err'); return false; }
+      return true;
+    }
+
+    async function agregarPregunta() {
+      if (!esAdmin()) return;
+      const input = document.getElementById('ev-nueva');
+      const texto = input.value.trim().replace(/\s+/g, ' ');
+      if (!validarTexto(texto, null)) return;
+
+      const btn = document.getElementById('btn-ev-agregar');
+      btn.disabled = true; btn.textContent = 'Guardando...';
+      const orden = preguntasDe(evTipo).reduce((max, p) => Math.max(max, p.orden || 0), 0) + 1;
+      const { error } = await db.from('preguntas').insert({ tipo: evTipo, texto, orden, activa: true });
+      btn.disabled = false; btn.textContent = '＋ Agregar pregunta';
+
+      if (error) { toast('No se pudo agregar: ' + error.message, 'err'); return; }
+      input.value = '';
+      toast(`Pregunta agregada: ya aparece en el panel ${DEL_PANEL[evTipo]} ✓`, 'ok');
+      await loadPreguntasAdmin();
+    }
+
+    function editarPregunta(id) {
+      const p = preguntasAdmin.find(x => x.id === id);
+      if (!p) return;
+      preguntaEditando = p;
+      const n = respuestasPorPregunta[p.id] || 0;
+      document.getElementById('ev-edit-titulo').textContent = 'Editar pregunta — ' + NOMBRES_COMP[p.tipo];
+      document.getElementById('ev-edit-texto').value = p.texto;
+      document.getElementById('ev-edit-activa').checked = !!p.activa;
+      document.getElementById('ev-edit-activa-label').textContent = 'Activa (visible en el panel ' + DEL_PANEL[p.tipo] + ')';
+      document.getElementById('ev-edit-aviso').textContent = n
+        ? `Esta pregunta ya tiene ${n} respuesta${n === 1 ? '' : 's'}. Si cambias su sentido, esas respuestas seguirán contando para la nota.`
+        : '';
+      const modal = document.getElementById('modal-pregunta');
+      modal.style.display = 'flex'; modal.classList.remove('hidden');
+      document.getElementById('ev-edit-texto').focus();
+    }
+
+    function cerrarEdicion() {
+      const modal = document.getElementById('modal-pregunta');
+      modal.style.display = 'none'; modal.classList.add('hidden');
+      preguntaEditando = null;
+    }
+
+    async function guardarEdicion() {
+      if (!esAdmin() || !preguntaEditando) return;
+      const p = preguntaEditando;
+      const texto = document.getElementById('ev-edit-texto').value.trim().replace(/\s+/g, ' ');
+      const activa = document.getElementById('ev-edit-activa').checked;
+      if (!validarTexto(texto, p.id)) return;
+      if (texto === p.texto && activa === p.activa) { cerrarEdicion(); return; }
+      if (!activa && p.activa && preguntasDe(p.tipo).filter(x => x.activa).length === 1 &&
+        !confirm(`Es la única pregunta activa de la ${NOMBRES_COMP[p.tipo]}: la evaluación dejará de aparecer para ${PANEL_DE[p.tipo]}. ¿Deseas continuar?`)) return;
+
+      const btn = document.getElementById('btn-ev-guardar');
+      btn.disabled = true; btn.textContent = 'Guardando...';
+      const { error } = await db.from('preguntas').update({ texto, activa }).eq('id', p.id);
+      btn.disabled = false; btn.textContent = '💾 Guardar cambios';
+
+      if (error) { toast('No se pudo guardar: ' + error.message, 'err'); return; }
+      cerrarEdicion();
+      toast('Pregunta actualizada ✓', 'ok');
+      await loadPreguntasAdmin();
+    }
+
+    async function toggleActiva(id) {
+      if (!esAdmin()) return;
+      const p = preguntasAdmin.find(x => x.id === id);
+      if (!p) return;
+      if (p.activa && preguntasDe(p.tipo).filter(x => x.activa).length === 1 &&
+        !confirm(`Es la única pregunta activa de la ${NOMBRES_COMP[p.tipo]}: la evaluación dejará de aparecer para ${PANEL_DE[p.tipo]}. ¿Deseas continuar?`)) return;
+      const { error } = await db.from('preguntas').update({ activa: !p.activa }).eq('id', id);
+      if (error) { toast('No se pudo cambiar el estado: ' + error.message, 'err'); return; }
+      toast(p.activa ? 'Pregunta desactivada: ya no aparece en el panel' : `Pregunta activada: aparece en el panel ${DEL_PANEL[p.tipo]} ✓`, 'ok');
+      await loadPreguntasAdmin();
+    }
+
+    async function moverPregunta(id, dir) {
+      if (!esAdmin()) return;
+      const lista = preguntasDe(evTipo);
+      const i = lista.findIndex(p => p.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= lista.length) return;
+      [lista[i], lista[j]] = [lista[j], lista[i]];
+      // Se renumera el orden 1, 2, 3... y solo se guardan las preguntas que cambian
+      const cambios = lista.map((p, k) => ({ p, orden: k + 1 })).filter(x => x.p.orden !== x.orden);
+      const resultados = await Promise.all(cambios.map(x => db.from('preguntas').update({ orden: x.orden }).eq('id', x.p.id)));
+      const fallo = resultados.find(r => r.error);
+      if (fallo) toast('No se pudo cambiar el orden: ' + fallo.error.message, 'err');
+      await loadPreguntasAdmin();
+    }
+
+    async function eliminarPregunta(id) {
+      if (!esAdmin()) return;
+      const p = preguntasAdmin.find(x => x.id === id);
+      if (!p) return;
+      const n = respuestasPorPregunta[p.id] || 0;
+      if (n) {
+        toast(`No se puede eliminar: tiene ${n} respuesta${n === 1 ? '' : 's'} registrada${n === 1 ? '' : 's'}. Desactívala para que deje de aparecer.`, 'err');
+        return;
+      }
+      if (!confirm('Vas a eliminar esta pregunta de la ' + NOMBRES_COMP[p.tipo] + ':\n\n"' + p.texto + '"\n\nEsta acción no se puede deshacer. ¿Deseas continuar?')) return;
+      const { error } = await db.from('preguntas').delete().eq('id', id);
+      if (error) {
+        toast(error.code === '23503'
+          ? 'No se puede eliminar porque ya tiene respuestas. Desactívala en su lugar.'
+          : 'No se pudo eliminar: ' + error.message, 'err');
+        return;
+      }
+      toast('Pregunta eliminada ✓', 'ok');
+      await loadPreguntasAdmin();
     }
 
     // ── CHART ─────────────────────────────────────────────────────────
